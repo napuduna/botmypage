@@ -56,4 +56,42 @@ const sessionSchema = new mongoose.Schema(
   }
 );
 
+/**
+ * Static helpers for session management
+ */
+sessionSchema.statics.getSession = async function (facebookId) {
+  return await this.findOne({ facebookId });
+};
+
+sessionSchema.statics.createSession = async function (facebookId, state = 'INIT') {
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+  const sess = new this({ facebookId, state, expiresAt });
+  await sess.save();
+  return sess;
+};
+
+sessionSchema.statics.updateState = async function (facebookId, state) {
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+  const session = await this.findOneAndUpdate(
+    { facebookId },
+    { $set: { state, updatedAt: new Date(), expiresAt } },
+    { new: true, upsert: true }
+  );
+  return session;
+};
+
+sessionSchema.statics.updateData = async function (facebookId, data = {}) {
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+  const existing = await this.findOne({ facebookId });
+  const merged = Object.assign({}, existing?.tempData || {}, data);
+
+  const session = await this.findOneAndUpdate(
+    { facebookId },
+    { $set: { tempData: merged, updatedAt: new Date(), expiresAt } },
+    { new: true, upsert: true }
+  );
+
+  return session;
+};
+
 module.exports = mongoose.model('Session', sessionSchema);

@@ -1,370 +1,214 @@
 const messengerService = require('./messenger.service');
 const lineService = require('./line.service');
 const customerService = require('./customer.service');
-const Session = require('../models/session.model');
+const sessionModel = require('../models/session.model');
 const logger = require('../utils/logger');
-const validator = require('../utils/validator');
 
 /**
- * Flow Service
- * ⭐ สำคัญที่สุด
- * ควบคุม State Machine ของการ conversation
+ * ปรับ FlowService ให้ใช้ API ปัจจุบัน
  */
+class FlowService {
+  constructor() {
+    this.STATES = {
+      INIT: 'INIT',
+      SELECT_CATEGORY: 'SELECT_CATEGORY',
+      SELECT_SERVICE: 'SELECT_SERVICE',
+      ASK_CUSTOM_SERVICE: 'ASK_CUSTOM_SERVICE',
+      ASK_BUDGET: 'ASK_BUDGET',
+      ASK_URGENT: 'ASK_URGENT',
+      ASK_DETAIL: 'ASK_DETAIL',
+      COMPLETED: 'COMPLETED',
+    };
 
-/**
- * State Machine Enum
- */
-const STATES = {
-  INIT: 'INIT',
-  SELECT_TYPE: 'SELECT_TYPE',
-  SELECT_CATEGORY: 'SELECT_CATEGORY',
-  ENTER_BUDGET: 'ENTER_BUDGET',
-  SELECT_TIMELINE: 'SELECT_TIMELINE',
-  COMPLETED: 'COMPLETED',
-};
-
-/**
- * Session Timeout: 30 minutes
- */
-const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
-
-/**
- * STATE: INIT → แสดงปุ่มเลือก A/B
- */
-const showTypeSelection = async (senderId) => {
-  const quickReplies = [
-    {
-      title: '👨‍🎓 นักศึกษา',
-      payload: 'TYPE_STUDENT',
-    },
-    {
-      title: '💼 ผู้ประกอบการ',
-      payload: 'TYPE_BUSINESS',
-    },
-  ];
-
-  await messengerService.sendQuickReply(
-    senderId,
-    'สวัสดีครับ 👋\n\nคุณเป็นใครครับ?',
-    quickReplies
-  );
-};
-
-/**
- * STATE: SELECT_CATEGORY → ประเภทงาน
- */
-const showCategorySelection = async (senderId, userType) => {
-  let categories = [];
-
-  if (userType === 'student') {
-    categories = [
-      { title: '🌐 เว็บไซต์', payload: 'CAT_WEBSITE' },
-      { title: '💻 โปรแกรม', payload: 'CAT_PROGRAM' },
-      { title: '🤖 Arduino/IoT', payload: 'CAT_ARDUINO' },
-      { title: '🤖 บอท', payload: 'CAT_BOT' },
-      { title: '🔧 แก้ไขงาน', payload: 'CAT_FIX' },
-    ];
-  } else if (userType === 'business') {
-    categories = [
-      { title: '🌐 เว็บไซต์', payload: 'CAT_WEBSITE' },
-      { title: '💻 โปรแกรม', payload: 'CAT_PROGRAM' },
-      { title: '🤖 บอท', payload: 'CAT_BOT' },
-      { title: '🔧 แก้ไขงาน', payload: 'CAT_FIX' },
-      { title: '📊 Flexsim', payload: 'CAT_FLEXSIM' },
-    ];
+    this.OWNER_LINE_USER_ID = process.env.LINE_OWNER_ID || 'U0000000000000000000000';
   }
 
-  await messengerService.sendQuickReply(
-    senderId,
-    'ประเภทงานที่ต้องการครับ?',
-    categories
-  );
-};
+  async handleEvent(senderId, message) {
+    let session = await sessionModel.getSession(senderId);
 
-/**
- * STATE: ENTER_BUDGET → ขอจำนวนเงิน
- */
-const askBudget = async (senderId) => {
-  await messengerService.sendMessage(
-    senderId,
-    'มีงบประมาณเท่าไหร่ครับ? (กรุณาใส่เป็นตัวเลข)\n\nตัวอย่าง: 5000'
-  );
-};
-
-/**
- * STATE: SELECT_TIMELINE → งบ valid แล้ว ถามเวลา
- */
-const showTimelineSelection = async (senderId) => {
-  const quickReplies = [
-    { title: '⚡ 3 วัน', payload: 'TIME_3DAYS' },
-    { title: '📅 7 วัน', payload: 'TIME_7DAYS' },
-    { title: '📆 14 วัน', payload: 'TIME_14DAYS' },
-  ];
-
-  await messengerService.sendQuickReply(
-    senderId,
-    'อยากได้งานด่วนแค่ไหน?',
-    quickReplies
-  );
-};
-
-/**
- * STATE: COMPLETED → ขอบคุณและบอกให้ส่งรายละเอียด
- */
-const sendThankYouMessage = async (senderId) => {
-  await messengerService.sendMessage(
-    senderId,
-    '✅ ขอบคุณที่ติดต่อมานะครับ 🙏\n\n' +
-      'รบกวนทิ้งรายละเอียดงานไว้เพื่อการเสนอราคางานของคุณ\n' +
-      'แอดมินจะกลับมาโดยเร็วที่สุด!!!\n\n' +
-      '(ข้อมูลของคุณจะหมดอายุใน 30 นาที)'
-  );
-};
-
-/**
- * ส่งข้อมูล ไปยัง LINE
- */
-const sendToLineChannel = async (senderId) => {
-  try {
-    const customer = await customerService.getCustomerByFacebookId(senderId);
-
-    if (!customer) {
-      logger.warn(`No customer found for ${senderId}`);
-      return;
+    if (!session) {
+      session = await sessionModel.createSession(senderId, this.STATES.INIT);
     }
 
-    const message = lineService.createTextMessage(
-      `📌 ข้อมูลลูกค้าใหม่\n` +
-        `Facebook ID: ${senderId}\n` +
-        `ประเภท: ${customer.type === 'student' ? '👨‍🎓 นักเรียน' : '💼 ผู้ประกอบการ'}\n` +
-        `รายละเอียด: ${JSON.stringify(customer.detail, null, 2)}`
-    );
+    const state = session.state;
 
-    // ส่งไปยัง owner หรือ admin group ใน LINE
-    // เปลี่ยน OWNER_LINE_USER_ID เป็น LINE ID ของตัวเอง
-    const OWNER_LINE_USER_ID = process.env.LINE_OWNER_ID || 'U0000000000000000000000';
+    // reset command
+    if (message.text && message.text.toLowerCase() === 'reset') {
+      await sessionModel.updateState(senderId, this.STATES.INIT);
+      return this.sendCategory(senderId);
+    }
 
-    await lineService.pushMessage(OWNER_LINE_USER_ID, message);
-    logger.info(`✅ Data sent to LINE for ${senderId}`);
-  } catch (error) {
-    logger.error('Error sending to LINE:', error);
+    switch (state) {
+      case this.STATES.INIT:
+        return this.sendCategory(senderId);
+
+      case this.STATES.SELECT_CATEGORY:
+        return this.handleCategory(senderId, message);
+
+      case this.STATES.SELECT_SERVICE:
+        return this.handleService(senderId, message);
+
+      case this.STATES.ASK_CUSTOM_SERVICE:
+        return this.handleCustomService(senderId, message);
+
+      case this.STATES.ASK_BUDGET:
+        return this.handleBudget(senderId, message);
+
+      case this.STATES.ASK_URGENT:
+        return this.handleUrgent(senderId, message);
+
+      case this.STATES.ASK_DETAIL:
+        return this.handleDetail(senderId, message);
+
+      case this.STATES.COMPLETED:
+        await sessionModel.updateState(senderId, this.STATES.INIT);
+        return this.sendCategory(senderId);
+
+      default:
+        await sessionModel.updateState(senderId, this.STATES.INIT);
+        return this.sendCategory(senderId);
+    }
   }
-};
 
-/**
- * Update Session State
- */
-const updateSessionState = async (senderId, newState, tempData = {}) => {
-  try {
-    const session = await Session.findOneAndUpdate(
-      { facebookId: senderId },
-      {
-        $set: {
-          state: newState,
-          tempData,
-          updatedAt: new Date(),
-        },
-      },
-      { new: true, upsert: true }
-    );
+  async sendCategory(senderId) {
+    await sessionModel.updateState(senderId, this.STATES.SELECT_CATEGORY);
 
-    logger.info(`📍 State updated: ${senderId} → ${newState}`);
-    return session;
-  } catch (error) {
-    logger.error('Error updating session:', error);
-    throw error;
+    return messengerService.sendQuickReply(senderId, 'สวัสดีครับ กรุณาเลือกประเภทลูกค้า', [
+      { title: 'นักศึกษา', payload: 'STUDENT' },
+      { title: 'ผู้ประกอบการ', payload: 'BUSINESS' },
+    ]);
   }
-};
 
-/**
- * Get Current Session
- */
-const getSession = async (senderId) => {
-  try {
-    const session =
-      (await Session.findOne({ facebookId: senderId })) ||
-      (await updateSessionState(senderId, STATES.INIT));
+  async handleCategory(senderId, message) {
+    if (!message.quick_reply) return;
 
-    return session;
-  } catch (error) {
-    logger.error('Error getting session:', error);
-    throw error;
+    const payload = message.quick_reply.payload;
+    const type = payload === 'STUDENT' ? 'student' : 'real';
+
+    await sessionModel.updateData(senderId, { type });
+    await sessionModel.updateState(senderId, this.STATES.SELECT_SERVICE);
+
+    return messengerService.sendQuickReply(senderId, 'กรุณาเลือกประเภทงานที่ต้องการ', [
+      { title: 'เว็บไซต์', payload: 'SERVICE_WEBSITE' },
+      { title: 'โปรแกรม', payload: 'SERVICE_PROGRAM' },
+      { title: 'Arduino', payload: 'SERVICE_ARDUINO' },
+      { title: 'IOT', payload: 'SERVICE_IOT' },
+      { title: 'บอท', payload: 'SERVICE_BOT' },
+      { title: 'แก้ไขงาน', payload: 'SERVICE_FIX' },
+      { title: 'เขียนวงจร', payload: 'SERVICE_CIRCUIT' },
+      { title: 'Flexsim', payload: 'SERVICE_FLEXSIM' },
+      { title: 'อื่นๆ', payload: 'SERVICE_OTHER' },
+    ]);
   }
-};
 
-/**
- * ประมวลผล Message เข้ามา (Main Flow)
- */
-const processMessage = async (senderId, messaging) => {
-  try {
-    // ดึง session ปัจจุบัน
-    let session = await getSession(senderId);
-    let currentState = session.state;
+  async handleService(senderId, message) {
+    if (!message.quick_reply) return;
 
-    logger.info(`🔄 Processing: ${senderId} | State: ${currentState}`);
+    const payload = message.quick_reply.payload;
 
-    // ===== ตรวจสอบ Timeout =====
-    const lastUpdate = session.updatedAt ? new Date(session.updatedAt).getTime() : 0;
-    const now = Date.now();
-    const elapsed = now - lastUpdate;
-
-    if (elapsed > SESSION_TIMEOUT_MS && currentState !== STATES.INIT) {
-      logger.info(`⏰ Session timeout for ${senderId} - resetting`);
-      await updateSessionState(senderId, STATES.INIT);
-      await messengerService.sendMessage(
-        senderId,
-        '⏰ ขออภัยครับ ข้อมูลหมดอายุแล้ว (30 นาที)\n\nเริ่มใหม่อีกครั้งครับ'
-      );
-      currentState = STATES.INIT;
+    if (payload === 'SERVICE_OTHER') {
+      await sessionModel.updateState(senderId, this.STATES.ASK_CUSTOM_SERVICE);
+      return messengerService.sendMessage(senderId, 'กรุณาระบุประเภทงานที่ต้องการ');
     }
 
-    // ===== STATE: INIT =====
-    if (currentState === STATES.INIT) {
-      await updateSessionState(senderId, STATES.SELECT_TYPE);
-      await showTypeSelection(senderId);
-      return;
+    const serviceMap = {
+      SERVICE_WEBSITE: 'เว็บไซต์',
+      SERVICE_PROGRAM: 'โปรแกรม',
+      SERVICE_ARDUINO: 'Arduino',
+      SERVICE_IOT: 'IOT',
+      SERVICE_BOT: 'บอท',
+      SERVICE_FIX: 'แก้ไขงาน',
+      SERVICE_CIRCUIT: 'เขียนวงจร',
+      SERVICE_FLEXSIM: 'Flexsim',
+    };
+
+    await sessionModel.updateData(senderId, { service: serviceMap[payload] });
+    await sessionModel.updateState(senderId, this.STATES.ASK_BUDGET);
+
+    return messengerService.sendMessage(senderId, 'มีงบประมาณไม่เกินเท่าไหร่ครับ? (กรุณาระบุตัวเลข เช่น 3000)');
+  }
+
+  async handleCustomService(senderId, message) {
+    if (!message.text) return;
+
+    await sessionModel.updateData(senderId, { service: message.text });
+    await sessionModel.updateState(senderId, this.STATES.ASK_BUDGET);
+
+    return messengerService.sendMessage(senderId, 'มีงบประมาณไม่เกินเท่าไหร่ครับ? (กรุณาระบุตัวเลข เช่น 3000)');
+  }
+
+  async handleBudget(senderId, message) {
+    if (!message.text || isNaN(message.text)) {
+      return messengerService.sendMessage(senderId, 'กรุณาระบุตัวเลขงบประมาณให้ถูกต้อง');
     }
 
-    // ===== STATE: SELECT_TYPE =====
-    if (currentState === STATES.SELECT_TYPE) {
-      const payload = messaging.message?.quick_reply?.payload;
+    const budget = parseInt(message.text, 10);
+    await sessionModel.updateData(senderId, { budget });
+    await sessionModel.updateState(senderId, this.STATES.ASK_URGENT);
 
-      if (payload === 'TYPE_STUDENT') {
-        await updateSessionState(senderId, STATES.SELECT_CATEGORY, {
-          userType: 'student',
-        });
-        await showCategorySelection(senderId, 'student');
-        return;
-      } else if (payload === 'TYPE_BUSINESS') {
-        await updateSessionState(senderId, STATES.SELECT_CATEGORY, {
-          userType: 'business',
-        });
-        await showCategorySelection(senderId, 'business');
-        return;
-      } else {
-        await messengerService.sendMessage(senderId, '⚠️ กรุณาเลือกจากปุ่มด้านล่างครับ');
-        return;
-      }
-    }
+    return messengerService.sendQuickReply(senderId, 'ต้องการงานด่วนภายในกี่วันครับ?', [
+      { title: '3 วัน', payload: 'URGENT_3' },
+      { title: '7 วัน', payload: 'URGENT_7' },
+      { title: '14 วัน', payload: 'URGENT_14' },
+    ]);
+  }
 
-    // ===== STATE: SELECT_CATEGORY =====
-    if (currentState === STATES.SELECT_CATEGORY) {
-      const payload = messaging.message?.quick_reply?.payload;
+  async handleUrgent(senderId, message) {
+    if (!message.quick_reply) return;
 
-      if (!payload) {
-        await messengerService.sendMessage(senderId, '⚠️ กรุณาเลือกจากปุ่มด้านล่างครับ');
-        return;
-      }
+    const urgentMap = {
+      URGENT_3: '3 วัน',
+      URGENT_7: '7 วัน',
+      URGENT_14: '14 วัน',
+    };
 
-      // Map payload to category name
-      const categoryMap = {
-        CAT_WEBSITE: 'เว็บไซต์',
-        CAT_PROGRAM: 'โปรแกรม',
-        CAT_ARDUINO: 'Arduino/IoT',
-        CAT_BOT: 'บอท',
-        CAT_FIX: 'แก้ไขงาน',
-        CAT_FLEXSIM: 'Flexsim',
-      };
+    await sessionModel.updateData(senderId, { urgent: urgentMap[message.quick_reply.payload] });
+    await sessionModel.updateState(senderId, this.STATES.ASK_DETAIL);
 
-      const categoryName = categoryMap[payload] || payload;
-
-      await updateSessionState(senderId, STATES.ENTER_BUDGET, {
-        userType: session.tempData?.userType,
-        category: categoryName,
-      });
-      await askBudget(senderId);
-      return;
-    }
-
-    // ===== STATE: ENTER_BUDGET =====
-    if (currentState === STATES.ENTER_BUDGET) {
-      const budgetText = messaging.message?.text || '';
-
-      // Validate: ต้องเป็นตัวเลข
-      if (!validator.isNumber(budgetText) || budgetText.trim() === '') {
-        await messengerService.sendMessage(
-          senderId,
-          '❌ กรุณาใส่งบประมาณเป็นตัวเลขเท่านั้นครับ\n\nตัวอย่าง: 5000'
-        );
-        return;
-      }
-
-      const budget = parseInt(budgetText);
-
-      await updateSessionState(senderId, STATES.SELECT_TIMELINE, {
-        userType: session.tempData?.userType,
-        category: session.tempData?.category,
-        budget: budget,
-      });
-      await showTimelineSelection(senderId);
-      return;
-    }
-
-    // ===== STATE: SELECT_TIMELINE =====
-    if (currentState === STATES.SELECT_TIMELINE) {
-      const payload = messaging.message?.quick_reply?.payload;
-
-      if (!payload) {
-        await messengerService.sendMessage(senderId, '⚠️ กรุณาเลือกจากปุ่มด้านล่างครับ');
-        return;
-      }
-
-      // Map payload to timeline
-      const timelineMap = {
-        TIME_3DAYS: '3 วัน',
-        TIME_7DAYS: '7 วัน',
-        TIME_14DAYS: '14 วัน',
-      };
-
-      const timeline = timelineMap[payload] || payload;
-
-      // บันทึกข้อมูลลงฐานข้อมูล
-      await customerService.saveCustomerDetail(senderId, session.tempData?.userType, {
-        category: session.tempData?.category,
-        budget: session.tempData?.budget,
-        timeline: timeline,
-      });
-
-      // ส่งข้อมูลไป LINE
-      await sendToLineChannel(senderId);
-
-      // Update state to COMPLETED
-      await updateSessionState(senderId, STATES.COMPLETED);
-      await sendThankYouMessage(senderId);
-      return;
-    }
-
-    // ===== STATE: COMPLETED =====
-    if (currentState === STATES.COMPLETED) {
-      await messengerService.sendMessage(
-        senderId,
-        '💬 ขอบคุณสำหรับข้อมูลครับ\n\n' +
-          'พิมพ์ "reset" เพื่อเริ่มใหม่'
-      );
-
-      // ถ้าพิมพ์ reset ให้เริ่มใหม่
-      if (messaging.message?.text?.toLowerCase().trim() === 'reset') {
-        await updateSessionState(senderId, STATES.INIT);
-        await showTypeSelection(senderId);
-      }
-      return;
-    }
-  } catch (error) {
-    logger.error(`Error processing message from ${senderId}:`, error);
-    await messengerService.sendMessage(
+    return messengerService.sendMessage(
       senderId,
-      '❌ มีข้อผิดพลาดเกิดขึ้น โปรดลองใหม่อีกครั้ง'
+      'ขอบคุณที่ติดต่อมานะครับ 🙏\nรบกวนทิ้งรายละเอียดงานไว้เพื่อการเสนอราคางานของคุณ\nแอดมินจะกลับมาโดยเร็วที่สุด!!!'
     );
   }
-};
 
-module.exports = {
-  STATES,
-  processMessage,
-  updateSessionState,
-  getSession,
-  showTypeSelection,
-  saveStudentResponse,
-  saveBusinessResponse,
-  sendToLineChannel,
-};
+  async handleDetail(senderId, message) {
+    if (!message.text) return;
+
+    await sessionModel.updateData(senderId, { detail: message.text });
+
+    const finalData = await sessionModel.getSession(senderId);
+
+    // finalData.tempData contains collected fields
+    const payload = finalData.tempData || {};
+
+    // Normalize type stored earlier as 'student'|'real'
+    const type = payload.type || 'real';
+
+    // Save customer using existing customer.service API
+    await customerService.saveCustomerDetail(senderId, type, {
+      service: payload.service,
+      budget: payload.budget,
+      urgent: payload.urgent,
+      detail: payload.detail || message.text,
+    });
+
+    // Send notification to LINE owner
+    try {
+      const text = `📌 ข้อมูลลูกค้าใหม่\nFacebook ID: ${senderId}\nประเภท: ${type}\nข้อมูล: ${JSON.stringify(
+        payload,
+        null,
+        2
+      )}`;
+
+      const msg = lineService.createTextMessage(text);
+      await lineService.pushMessage(this.OWNER_LINE_USER_ID, msg);
+    } catch (err) {
+      logger.error('Error sending LINE notification', err);
+    }
+
+    await sessionModel.updateState(senderId, this.STATES.COMPLETED);
+    return messengerService.sendMessage(senderId, 'ข้อมูลถูกส่งเรียบร้อยแล้วครับ ✅');
+  }
+}
+
+module.exports = new FlowService();
