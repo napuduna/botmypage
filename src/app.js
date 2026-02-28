@@ -10,6 +10,18 @@ const webhookRoute = require('./routes/webhook.route');
 const app = express();
 
 // ============= Middleware =============
+// Capture raw body BEFORE json parsing (for Facebook signature verification)
+app.use((req, res, next) => {
+  let data = '';
+  req.on('data', (chunk) => {
+    data += chunk;
+  });
+  req.on('end', () => {
+    req.rawBody = data;
+    next();
+  });
+});
+
 app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
