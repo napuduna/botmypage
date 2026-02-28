@@ -210,5 +210,13 @@ class FlowService {
     return messengerService.sendMessage(senderId, 'ข้อมูลถูกส่งเรียบร้อยแล้วครับ ✅');
   }
 }
+const flowInstance = new FlowService();
 
-module.exports = new FlowService();
+// Compatibility wrapper for older code expecting processMessage(senderId, messaging)
+flowInstance.processMessage = async function (senderId, messaging) {
+  // Facebook payload shape: messaging.message may exist
+  const message = messaging?.message || messaging;
+  return this.handleEvent(senderId, message);
+};
+
+module.exports = flowInstance;
