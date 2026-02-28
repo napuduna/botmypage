@@ -10,20 +10,20 @@ const webhookRoute = require('./routes/webhook.route');
 const app = express();
 
 // ============= Middleware =============
-// Capture raw body BEFORE json parsing (for Facebook signature verification)
+app.use(cors());
+
+// Capture raw body for webhook signature verification BEFORE parsing JSON
+app.use(express.raw({ type: 'application/json' }));
+
+// Custom middleware to store raw body and parse JSON
 app.use((req, res, next) => {
-  let data = '';
-  req.on('data', (chunk) => {
-    data += chunk;
-  });
-  req.on('end', () => {
-    req.rawBody = data;
-    next();
-  });
+  if (req.body && Buffer.isBuffer(req.body)) {
+    req.rawBody = req.body.toString();
+    req.body = JSON.parse(req.rawBody);
+  }
+  next();
 });
 
-app.use(cors());
-app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // ============= Request Logger =============
