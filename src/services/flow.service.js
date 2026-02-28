@@ -202,15 +202,34 @@ class FlowService {
       detail: payload.detail || message.text,
     });
 
-    // Send notification to LINE owner
+    // Send notification to LINE owner (Flex message)
     try {
-      const text = `📌 ข้อมูลลูกค้าใหม่\nFacebook ID: ${senderId}\nประเภท: ${type}\nข้อมูล: ${JSON.stringify(
-        payload,
-        null,
-        2
-      )}`;
+      const flex = {
+        type: 'bubble',
+        header: {
+          type: 'box',
+          layout: 'vertical',
+          contents: [
+            { type: 'text', text: '📌 ลูกค้าใหม่', weight: 'bold', size: 'md' },
+          ],
+        },
+        body: {
+          type: 'box',
+          layout: 'vertical',
+          contents: [
+            { type: 'text', text: `Facebook ID: ${senderId}`, wrap: true },
+            { type: 'text', text: `ประเภท: ${type}`, wrap: true },
+            { type: 'text', text: `บริการ: ${payload.service || '-'} `, wrap: true },
+            { type: 'text', text: `งบประมาณ: ${payload.budget || '-'} บาท`, wrap: true },
+            { type: 'text', text: `ความเร่งด่วน: ${payload.urgent || '-'}`, wrap: true },
+            { type: 'separator' },
+            { type: 'text', text: 'รายละเอียด:', weight: 'bold' },
+            { type: 'text', text: payload.detail || message.text || '-', wrap: true },
+          ],
+        },
+      };
 
-      const msg = lineService.createTextMessage(text);
+      const msg = lineService.createFlexMessage('ข้อมูลลูกค้าใหม่', flex);
       await lineService.pushMessage(this.OWNER_LINE_USER_ID, msg);
     } catch (err) {
       logger.error('Error sending LINE notification', err);
