@@ -16,20 +16,24 @@ const sessionSchema = new mongoose.Schema(
 
     // State Machine States:
     // INIT - เริ่มต้น
-    // WAIT_TYPE_SELECTION - รอเลือกประเภท
-    // WAIT_DETAIL - รอรายละเอียด
+    // SELECT_TYPE - เลือกประเภท (นักศึกษา/ผู้ประกอบการ)
+    // SELECT_CATEGORY - เลือกหมวดงาน
+    // ENTER_BUDGET - ใส่งบประมาณ
+    // SELECT_TIMELINE - เลือกเวลา
     // COMPLETED - เสร็จสิ้น
     state: {
       type: String,
-      enum: ['INIT', 'WAIT_TYPE_SELECTION', 'WAIT_DETAIL', 'COMPLETED'],
+      enum: ['INIT', 'SELECT_TYPE', 'SELECT_CATEGORY', 'ENTER_BUDGET', 'SELECT_TIMELINE', 'COMPLETED'],
       default: 'INIT',
     },
 
     // ข้อมูลชั่วคราว
     tempData: {
       type: {
-        selectedType: String, // 'student' | 'real'
-        responses: mongoose.Schema.Types.Mixed, // เก็บข้อมูลเก่า
+        userType: String, // 'student' | 'business'
+        category: String, // 'เว็บไซต์', 'โปรแกรม', etc.
+        budget: Number, // งบประมาณ
+        timeline: String, // '3 วัน', '7 วัน', '14 วัน'
       },
       default: {},
     },
@@ -40,10 +44,10 @@ const sessionSchema = new mongoose.Schema(
       default: 0,
     },
 
-    // Timeout: ปิด session หลังจาก 24 ชั่วโมง
+    // Timeout: 30 นาที
     expiresAt: {
       type: Date,
-      default: () => new Date(Date.now() + 24 * 60 * 60 * 1000),
+      default: () => new Date(Date.now() + 30 * 60 * 1000),
       index: { expires: 0 },
     },
   },
