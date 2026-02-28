@@ -73,10 +73,14 @@ class FlowService {
   async sendCategory(senderId) {
     await sessionModel.updateState(senderId, this.STATES.SELECT_CATEGORY);
 
-    return messengerService.sendQuickReply(senderId, 'สวัสดีครับ กรุณาเลือกประเภทลูกค้า', [
-      { title: 'นักศึกษา', payload: 'STUDENT' },
-      { title: 'ผู้ประกอบการ', payload: 'BUSINESS' },
-    ]);
+    return messengerService.sendQuickReply(
+      senderId,
+      '👋 สวัสดีครับ! กรุณาเลือกประเภทลูกค้า',
+      [
+        { title: '👨‍🎓 นักศึกษา', payload: 'STUDENT' },
+        { title: '💼 ผู้ประกอบการ', payload: 'BUSINESS' },
+      ]
+    );
   }
 
   async handleCategory(senderId, message) {
@@ -88,16 +92,16 @@ class FlowService {
     await sessionModel.updateData(senderId, { type });
     await sessionModel.updateState(senderId, this.STATES.SELECT_SERVICE);
 
-    return messengerService.sendQuickReply(senderId, 'กรุณาเลือกประเภทงานที่ต้องการ', [
-      { title: 'เว็บไซต์', payload: 'SERVICE_WEBSITE' },
-      { title: 'โปรแกรม', payload: 'SERVICE_PROGRAM' },
-      { title: 'Arduino', payload: 'SERVICE_ARDUINO' },
-      { title: 'IOT', payload: 'SERVICE_IOT' },
-      { title: 'บอท', payload: 'SERVICE_BOT' },
-      { title: 'แก้ไขงาน', payload: 'SERVICE_FIX' },
-      { title: 'เขียนวงจร', payload: 'SERVICE_CIRCUIT' },
-      { title: 'Flexsim', payload: 'SERVICE_FLEXSIM' },
-      { title: 'อื่นๆ', payload: 'SERVICE_OTHER' },
+    return messengerService.sendQuickReply(senderId, '🔎 กรุณาเลือกประเภทงานที่ต้องการ', [
+      { title: '🌐 เว็บไซต์', payload: 'SERVICE_WEBSITE' },
+      { title: '💻 โปรแกรม', payload: 'SERVICE_PROGRAM' },
+      { title: '🤖 Arduino', payload: 'SERVICE_ARDUINO' },
+      { title: '📡 IOT', payload: 'SERVICE_IOT' },
+      { title: '🤖 บอท', payload: 'SERVICE_BOT' },
+      { title: '🔧 แก้ไขงาน', payload: 'SERVICE_FIX' },
+      { title: '🔌 เขียนวงจร', payload: 'SERVICE_CIRCUIT' },
+      { title: '📊 Flexsim', payload: 'SERVICE_FLEXSIM' },
+      { title: '✏️ อื่นๆ', payload: 'SERVICE_OTHER' },
     ]);
   }
 
@@ -125,7 +129,10 @@ class FlowService {
     await sessionModel.updateData(senderId, { service: serviceMap[payload] });
     await sessionModel.updateState(senderId, this.STATES.ASK_BUDGET);
 
-    return messengerService.sendMessage(senderId, 'มีงบประมาณไม่เกินเท่าไหร่ครับ? (กรุณาระบุตัวเลข เช่น 3000)');
+    return messengerService.sendMessage(
+      senderId,
+      '💸 มีงบประมาณไม่เกินเท่าไหร่ครับ? (กรุณาระบุตัวเลข เช่น 3000)'
+    );
   }
 
   async handleCustomService(senderId, message) {
@@ -134,7 +141,10 @@ class FlowService {
     await sessionModel.updateData(senderId, { service: message.text });
     await sessionModel.updateState(senderId, this.STATES.ASK_BUDGET);
 
-    return messengerService.sendMessage(senderId, 'มีงบประมาณไม่เกินเท่าไหร่ครับ? (กรุณาระบุตัวเลข เช่น 3000)');
+    return messengerService.sendMessage(
+      senderId,
+      '💸 มีงบประมาณไม่เกินเท่าไหร่ครับ? (กรุณาระบุตัวเลข เช่น 3000)'
+    );
   }
 
   async handleBudget(senderId, message) {
@@ -146,10 +156,10 @@ class FlowService {
     await sessionModel.updateData(senderId, { budget });
     await sessionModel.updateState(senderId, this.STATES.ASK_URGENT);
 
-    return messengerService.sendQuickReply(senderId, 'ต้องการงานด่วนภายในกี่วันครับ?', [
-      { title: '3 วัน', payload: 'URGENT_3' },
-      { title: '7 วัน', payload: 'URGENT_7' },
-      { title: '14 วัน', payload: 'URGENT_14' },
+    return messengerService.sendQuickReply(senderId, '⏱️ ต้องการงานด่วนภายในกี่วันครับ?', [
+      { title: '⚡ 3 วัน', payload: 'URGENT_3' },
+      { title: '📅 7 วัน', payload: 'URGENT_7' },
+      { title: '📆 14 วัน', payload: 'URGENT_14' },
     ]);
   }
 
@@ -167,7 +177,7 @@ class FlowService {
 
     return messengerService.sendMessage(
       senderId,
-      'ขอบคุณที่ติดต่อมานะครับ 🙏\nรบกวนทิ้งรายละเอียดงานไว้เพื่อการเสนอราคางานของคุณ\nแอดมินจะกลับมาโดยเร็วที่สุด!!!'
+      '🙏 ขอบคุณที่ติดต่อมานะครับ\nรบกวนทิ้งรายละเอียดงานไว้เพื่อการเสนอราคางานของคุณ\nแอดมินจะติดต่อกลับโดยเร็วที่สุดครับ 🎯'
     );
   }
 
