@@ -86,6 +86,7 @@ const processFacebookEntry = async (entry) => {
 
 /**
  * ประมวลผล LINE event
+ * LINE ใช้เฉพาะส่ง notification ให้เจ้าของ ไม่ใช่สำหรับ customer interaction
  */
 const processLineEvent = async (event) => {
   const userId = event.source?.userId;
@@ -93,15 +94,13 @@ const processLineEvent = async (event) => {
 
   logger.info(`📩 [LINE] New event (${eventType}) from userId: ${userId}`);
 
-  // ลอกข้อมูล event สำหรับ debug
-  if (event.type === 'message') {
-    logger.debug(`[LINE] Message content:`, event.message);
-  } else {
-    logger.debug(`[LINE] Event payload:`, event);
+  // เก็บ LINE_OWNER_ID สำหรับใช้ส่ง notification
+  if (!process.env.LINE_OWNER_ID && userId) {
+    logger.info(`💡 Hint: LINE_OWNER_ID should be set to: ${userId}`);
   }
 
-  // TODO: เชื่อมต่อกับ flow service เพื่อประมวลผลข้อความ LINE
-  // await flowService.processMessage(userId, event);
+  // ส่ง acknowledge เท่านั้น ไม่ process message จาก LINE
+  logger.debug(`[LINE] Event documented. LINE is for notifications only.`);
 };
 
 module.exports = {
