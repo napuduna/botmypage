@@ -166,6 +166,7 @@ class FlowService {
     };
 
     await sessionModel.updateData(senderId, { service: serviceMap[resolvedPayload] });
+    logger.info(`[SESSION] saved service for ${senderId}: ${serviceMap[resolvedPayload]}`);
     await sessionModel.updateState(senderId, this.STATES.ASK_BUDGET);
 
     return messengerService.sendMessage(
@@ -193,6 +194,7 @@ class FlowService {
 
     const budget = parseInt(message.text, 10);
     await sessionModel.updateData(senderId, { budget });
+    logger.info(`[SESSION] saved budget for ${senderId}: ${budget}`);
     await sessionModel.updateState(senderId, this.STATES.ASK_URGENT);
 
     return messengerService.sendQuickReply(senderId, '⏱️ ต้องการงานด่วนภายในกี่วันครับ?', [

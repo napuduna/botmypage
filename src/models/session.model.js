@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const logger = require('../utils/logger');
 
 /**
  * Session Schema
@@ -80,6 +81,7 @@ sessionSchema.statics.updateState = async function (facebookId, state) {
     { $set: { state, updatedAt: new Date(), expiresAt } },
     { new: true, upsert: true }
   );
+  logger.debug(`[SESSION] updateState ${facebookId} -> ${state}`);
   return session;
 };
 
@@ -93,6 +95,8 @@ sessionSchema.statics.updateData = async function (facebookId, data = {}) {
     { $set: { tempData: merged, updatedAt: new Date(), expiresAt } },
     { new: true, upsert: true }
   );
+
+  logger.debug(`[SESSION] updateData ${facebookId} -> ${JSON.stringify(merged)}`);
 
   return session;
 };
