@@ -74,10 +74,14 @@ const processFacebookEntry = async (entry) => {
     const pageId = entry.id;
 
     logger.info(`📩 [Facebook] New event from ${senderId}`);
+    logger.debug(`[DEBUG] messaging object:`, JSON.stringify(messaging, null, 2));
 
     try {
-      // ส่งต่อให้ flow service ประมวลผล
-      await flowService.processMessage(senderId, messaging);
+      // Extract message or postback from messaging event
+      const messageData = messaging.message || messaging.postback || {};
+      
+      // Pass extracted data to flow service
+      await flowService.processMessage(senderId, messageData);
     } catch (error) {
       logger.error(`Error processing message from ${senderId}:`, error);
     }
