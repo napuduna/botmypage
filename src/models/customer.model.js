@@ -53,6 +53,13 @@ const customerSchema = new mongoose.Schema(
       ipAddress: String,
       userAgent: String,
     },
+
+    // Auto-delete after 30 minutes
+    expiresAt: {
+      type: Date,
+      default: () => new Date(Date.now() + 30 * 60 * 1000),
+      index: { expires: 0 },
+    },
   },
   {
     timestamps: true, // createdAt, updatedAt

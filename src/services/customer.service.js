@@ -58,22 +58,24 @@ const updateCustomer = async (facebookId, data) => {
 };
 
 /**
- * บันทึกข้อมูล detail โดยรวม
+ * บันทึกข้อมูล detail โดยรวม (with 30-minute auto-delete)
  */
 const saveCustomerDetail = async (facebookId, type, detailData) => {
   try {
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
     const customer = await Customer.findOneAndUpdate(
       { facebookId },
       {
         $set: {
           type,
           detail: detailData,
+          expiresAt, // Auto-delete after 30 minutes
         },
       },
       { new: true, upsert: true }
     );
 
-    logger.info(`✅ Customer detail saved: ${facebookId} (${type})`);
+    logger.info(`✅ Customer detail saved: ${facebookId} (${type}) - auto-delete in 30min`);
     return customer;
   } catch (error) {
     logger.error(`Error saving customer detail:`, error);
