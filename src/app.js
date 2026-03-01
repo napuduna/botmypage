@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const path = require('path');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const mongoose = require('mongoose');
@@ -11,6 +12,9 @@ const app = express();
 
 // ============= Middleware =============
 app.use(cors());
+
+// Serve static files (privacy policy, assets)
+app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // Capture raw body for webhook signature verification BEFORE parsing JSON
 app.use(express.raw({ type: 'application/json' }));
@@ -38,6 +42,11 @@ app.use('/webhook', webhookRoute);
 // ============= Health Check =============
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK', timestamp: new Date() });
+});
+
+// Simple privacy policy route required for Facebook App publishing
+app.get('/privacy', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'privacy.html'));
 });
 
 // ============= 404 Handler =============
