@@ -30,15 +30,9 @@ const sessionSchema = new mongoose.Schema(
       default: 'INIT',
     },
 
-    // ข้อมูลชั่วคราว
+    // ข้อมูลชั่วคราว (เก็บเป็น Mixed เพื่อให้สามารถเก็บฟิลด์แบบไดนามิกได้)
     tempData: {
-      type: {
-        type: String, // 'student' | 'real'
-        service: String, // 'เว็บไซต์', 'โปรแกรม', etc.
-        budget: Number, // งบประมาณ
-        urgent: String, // '3 วัน', '7 วัน', '14 วัน'
-        detail: String, // รายละเอียด
-      },
+      type: mongoose.Schema.Types.Mixed,
       default: {},
     },
 
