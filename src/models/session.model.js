@@ -16,24 +16,27 @@ const sessionSchema = new mongoose.Schema(
 
     // State Machine States:
     // INIT - เริ่มต้น
-    // SELECT_TYPE - เลือกประเภท (นักศึกษา/ผู้ประกอบการ)
-    // SELECT_CATEGORY - เลือกหมวดงาน
-    // ENTER_BUDGET - ใส่งบประมาณ
-    // SELECT_TIMELINE - เลือกเวลา
+    // SELECT_CATEGORY - เลือกประเภท
+    // SELECT_SERVICE - เลือกบริการ
+    // ASK_CUSTOM_SERVICE - ปรับปรุงบริการเอง
+    // ASK_BUDGET - ใส่งบประมาณ
+    // ASK_URGENT - เลือกความเร่งด่วน
+    // ASK_DETAIL - ใส่รายละเอียด
     // COMPLETED - เสร็จสิ้น
     state: {
       type: String,
-      enum: ['INIT', 'SELECT_TYPE', 'SELECT_CATEGORY', 'ENTER_BUDGET', 'SELECT_TIMELINE', 'COMPLETED'],
+      enum: ['INIT', 'SELECT_CATEGORY', 'SELECT_SERVICE', 'ASK_CUSTOM_SERVICE', 'ASK_BUDGET', 'ASK_URGENT', 'ASK_DETAIL', 'COMPLETED'],
       default: 'INIT',
     },
 
     // ข้อมูลชั่วคราว
     tempData: {
       type: {
-        userType: String, // 'student' | 'business'
-        category: String, // 'เว็บไซต์', 'โปรแกรม', etc.
+        type: String, // 'student' | 'real'
+        service: String, // 'เว็บไซต์', 'โปรแกรม', etc.
         budget: Number, // งบประมาณ
-        timeline: String, // '3 วัน', '7 วัน', '14 วัน'
+        urgent: String, // '3 วัน', '7 วัน', '14 วัน'
+        detail: String, // รายละเอียด
       },
       default: {},
     },
