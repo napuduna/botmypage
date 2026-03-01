@@ -38,6 +38,21 @@ class FlowService {
       return this.sendCategory(senderId);
     }
 
+    // If conversation already completed, block further submissions until TTL expires
+    if (state === this.STATES.COMPLETED) {
+      // Inform user that their submission is received and to wait 30 minutes
+      try {
+        await messengerService.sendMessage(
+          senderId,
+          'ข้อมูลของคุณถูกส่งเรียบร้อยแล้ว กรุณารอ 30 นาที ก่อนส่งคำขอใหม่ หากต้องการรีเซ็ตทันที พิมพ์ "reset"'
+        );
+      } catch (e) {
+        // swallow errors but log
+        logger.error(`Error sending completed notice to ${senderId}:`, e);
+      }
+      return;
+    }
+
     switch (state) {
       case this.STATES.INIT:
         return this.sendCategory(senderId);
