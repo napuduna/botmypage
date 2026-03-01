@@ -84,10 +84,15 @@ class FlowService {
   }
 
   async handleCategory(senderId, message) {
-    if (!message.quick_reply) return;
+    // Handle quick_reply or postback
+    const payload = message.quick_reply?.payload || message.postback?.payload;
+    if (!payload) {
+      logger.warn(`[WARN] handleCategory: no payload found in message`);
+      return;
+    }
 
-    const payload = message.quick_reply.payload;
     const type = payload === 'STUDENT' ? 'student' : 'real';
+    logger.info(`[DEBUG] handleCategory: payload=${payload}, type=${type}`);
 
     await sessionModel.updateData(senderId, { type });
     await sessionModel.updateState(senderId, this.STATES.SELECT_SERVICE);
@@ -106,9 +111,13 @@ class FlowService {
   }
 
   async handleService(senderId, message) {
-    if (!message.quick_reply) return;
-
-    const payload = message.quick_reply.payload;
+    // Handle quick_reply or postback
+    const payload = message.quick_reply?.payload || message.postback?.payload;
+    if (!payload) {
+      logger.warn(`[WARN] handleService: no payload found in message`);
+      return;
+    }
+    logger.info(`[DEBUG] handleService: payload=${payload}`);
 
     if (payload === 'SERVICE_OTHER') {
       await sessionModel.updateState(senderId, this.STATES.ASK_CUSTOM_SERVICE);
@@ -164,7 +173,13 @@ class FlowService {
   }
 
   async handleUrgent(senderId, message) {
-    if (!message.quick_reply) return;
+    // Handle quick_reply or postback
+    const payload = message.quick_reply?.payload || message.postback?.payload;
+    if (!payload) {
+      logger.warn(`[WARN] handleUrgent: no payload found in message`);
+      return;
+    }
+    logger.info(`[DEBUG] handleUrgent: payload=${payload}`);
 
     const urgentMap = {
       URGENT_3: '3 วัน',
@@ -172,7 +187,7 @@ class FlowService {
       URGENT_14: '14 วัน',
     };
 
-    await sessionModel.updateData(senderId, { urgent: urgentMap[message.quick_reply.payload] });
+    await sessionModel.updateData(senderId, { urgent: urgentMap[payload] });
     await sessionModel.updateState(senderId, this.STATES.ASK_DETAIL);
 
     return messengerService.sendMessage(
