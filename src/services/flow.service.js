@@ -113,13 +113,43 @@ class FlowService {
   async handleService(senderId, message) {
     // Handle quick_reply or postback
     const payload = message.quick_reply?.payload || message.postback?.payload;
-    if (!payload) {
-      logger.warn(`[WARN] handleService: no payload found in message`);
-      return;
-    }
-    logger.info(`[DEBUG] handleService: payload=${payload}`);
+    // If payload missing, try to infer from message.text (user may type the option)
+    let resolvedPayload = payload;
+    const text = message.text && String(message.text).trim();
 
-    if (payload === 'SERVICE_OTHER') {
+    // Try to map typed text to a payload key
+    if (!resolvedPayload && text) {
+      const found = Object.entries({
+        SERVICE_WEBSITE: 'เว็บไซต์',
+        SERVICE_PROGRAM: 'โปรแกรม',
+        SERVICE_ARDUINO: 'Arduino',
+        SERVICE_IOT: 'IOT',
+        SERVICE_BOT: 'บอท',
+        SERVICE_FIX: 'แก้ไขงาน',
+        SERVICE_CIRCUIT: 'เขียนวงจร',
+        SERVICE_FLEXSIM: 'Flexsim',
+      }).find(([, v]) => {
+        if (!v) return false;
+        const a = String(v).toLowerCase();
+        const b = String(text).toLowerCase();
+        return a === b || b.includes(a) || a.includes(b);
+      });
+
+      if (found) {
+        resolvedPayload = found[0];
+        logger.info(`[DEBUG] handleService: resolved payload from text -> ${resolvedPayload}`);
+      } else {
+        // Treat as custom service text
+        await sessionModel.updateData(senderId, { service: text });
+        await sessionModel.updateState(senderId, this.STATES.ASK_BUDGET);
+        return messengerService.sendMessage(
+          senderId,
+          '💸 มีงบประมาณไม่เกินเท่าไหร่ครับ? (กรุณาระบุตัวเลข เช่น 3000)'
+        );
+      }
+    }
+
+    if (resolvedPayload === 'SERVICE_OTHER') {
       await sessionModel.updateState(senderId, this.STATES.ASK_CUSTOM_SERVICE);
       return messengerService.sendMessage(senderId, 'กรุณาระบุประเภทงานที่ต้องการ');
     }
@@ -135,7 +165,7 @@ class FlowService {
       SERVICE_FLEXSIM: 'Flexsim',
     };
 
-    await sessionModel.updateData(senderId, { service: serviceMap[payload] });
+    await sessionModel.updateData(senderId, { service: serviceMap[resolvedPayload] });
     await sessionModel.updateState(senderId, this.STATES.ASK_BUDGET);
 
     return messengerService.sendMessage(
@@ -174,7 +204,16 @@ class FlowService {
 
   async handleUrgent(senderId, message) {
     // Handle quick_reply or postback
-    const payload = message.quick_reply?.payload || message.postback?.payload;
+    let payload = message.quick_reply?.payload || message.postback?.payload;
+    const text = message.text && String(message.text).trim().toLowerCase();
+
+    // Fallback: if user typed a number/word instead of clicking quick reply
+    if (!payload && text) {
+      if (text.includes('3')) payload = 'URGENT_3';
+      else if (text.includes('7')) payload = 'URGENT_7';
+      else if (text.includes('14') || text.includes('14 วัน')) payload = 'URGENT_14';
+      if (payload) logger.info(`[DEBUG] handleUrgent: resolved payload from text -> ${payload}`);
+    }
     if (!payload) {
       logger.warn(`[WARN] handleUrgent: no payload found in message`);
       return;
