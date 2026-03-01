@@ -34,35 +34,46 @@ const verifyWebhook = (req, res) => {
 
 /**
  * POST /webhook
- * Handle incoming messages from Facebook Messenger
+ * Handle incoming messages from Facebook Messenger and LINE
  */
 const handleMessage = async (req, res) => {
   const body = req.body;
 
-  // ✅ ส่งค่า 200 ให้ Facebook ทันทีเพื่อไม่ให้ resend
+  // ✅ ส่งค่า 200 ให้ sender ทันทีเพื่อไม่ให้ resend
   res.status(200).send('EVENT_RECEIVED');
 
-  // ประมวลผลข้อมูล
+  // Facebook Messenger format
   if (body.object === 'page') {
     try {
       for (const entry of body.entry) {
-        await processEntry(entry);
+        await processFacebookEntry(entry);
       }
     } catch (error) {
-      logger.error('Error processing webhook:', error);
+      logger.error('Error processing Facebook webhook:', error);
+    }
+  }
+
+  // LINE Messaging API format
+  if (body.events && Array.isArray(body.events)) {
+    try {
+      for (const event of body.events) {
+        await processLineEvent(event);
+      }
+    } catch (error) {
+      logger.error('Error processing LINE webhook:', error);
     }
   }
 };
 
 /**
- * ประมวลผล entry หนึ่งรายการจาก Facebook
+ * ประมวลผล Facebook entry
  */
-const processEntry = async (entry) => {
+const processFacebookEntry = async (entry) => {
   for (const messaging of entry.messaging) {
     const senderId = messaging.sender.id;
     const pageId = entry.id;
 
-    logger.info(`📩 New event from ${senderId}`);
+    logger.info(`📩 [Facebook] New event from ${senderId}`);
 
     try {
       // ส่งต่อให้ flow service ประมวลผล
@@ -71,6 +82,26 @@ const processEntry = async (entry) => {
       logger.error(`Error processing message from ${senderId}:`, error);
     }
   }
+};
+
+/**
+ * ประมวลผล LINE event
+ */
+const processLineEvent = async (event) => {
+  const userId = event.source?.userId;
+  const eventType = event.type;
+
+  logger.info(`📩 [LINE] New event (${eventType}) from userId: ${userId}`);
+
+  // ลอกข้อมูล event สำหรับ debug
+  if (event.type === 'message') {
+    logger.debug(`[LINE] Message content:`, event.message);
+  } else {
+    logger.debug(`[LINE] Event payload:`, event);
+  }
+
+  // TODO: เชื่อมต่อกับ flow service เพื่อประมวลผลข้อความ LINE
+  // await flowService.processMessage(userId, event);
 };
 
 module.exports = {
