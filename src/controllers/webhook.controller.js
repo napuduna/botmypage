@@ -9,19 +9,27 @@ const flowService = require('../services/flow.service');
 const verifyWebhook = (req, res) => {
   const verifyToken = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
+  const mode = req.query['hub.mode'];
 
   logger.info(`📍 Verify request received`);
-  logger.debug(`Token from Facebook: "${verifyToken}"`);
-  logger.debug(`Config token: "${facebookConfig.VERIFY_TOKEN}"`);
+  logger.debug(`hub.mode: "${mode}", hub.verify_token: "${verifyToken}"`);
 
-  if (verifyToken === facebookConfig.VERIFY_TOKEN) {
-    logger.info('✅ Webhook verified');
-    res.status(200).send(challenge);
-  } else {
-    logger.warn('❌ Webhook verification failed - tokens do not match');
-    logger.warn(`Expected: "${facebookConfig.VERIFY_TOKEN}" | Got: "${verifyToken}"`);
-    res.status(403).send('Verification failed');
+  // If no verify token present it's likely a non-Facebook healthcheck
+  // (e.g. LINE Console / simple probe). Return 200 so LINE's Verify passes.
+  if (!verifyToken) {
+    logger.info('ℹ️  No hub.verify_token found - treating as health check (200)');
+    return res.status(200).send('OK');
   }
+
+  // Standard Facebook verification flow
+  if (mode === 'subscribe' && verifyToken === facebookConfig.VERIFY_TOKEN) {
+    logger.info('✅ Webhook verified');
+    return res.status(200).send(challenge);
+  }
+
+  logger.warn('❌ Webhook verification failed - tokens do not match');
+  logger.warn(`Expected: "${facebookConfig.VERIFY_TOKEN}" | Got: "${verifyToken}"`);
+  return res.status(403).send('Verification failed');
 };
 
 /**
