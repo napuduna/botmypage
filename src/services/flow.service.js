@@ -191,6 +191,9 @@ class FlowService {
     // finalData.tempData contains collected fields
     const payload = finalData.tempData || {};
 
+    logger.debug(`[DEBUG] Session tempData before LINE push:`, JSON.stringify(payload));
+    logger.info(`[DETAIL] Collected: type=${payload.type}, service=${payload.service}, budget=${payload.budget}, urgent=${payload.urgent}, detail=${message.text}`);
+
     // Normalize type stored earlier as 'student'|'real'
     const type = payload.type || 'real';
 
