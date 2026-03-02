@@ -34,18 +34,28 @@ class FlowService {
 
     // reset command
     if (message.text && message.text.toLowerCase() === 'reset') {
+      // Reset state and clear completed-notice flag so the notice can be sent again later
       await sessionModel.updateState(senderId, this.STATES.INIT);
+      await sessionModel.updateData(senderId, { completedNoticeSent: false });
       return this.sendCategory(senderId);
     }
 
     // If conversation already completed, block further submissions until TTL expires
     if (state === this.STATES.COMPLETED) {
       // Inform user that their submission is received and to wait 30 minutes
+      // but only send this notice once until they explicitly reset.
       try {
-        await messengerService.sendMessage(
-          senderId,
-          'ข้อมูลของคุณถูกส่งเรียบร้อยแล้ว กรุณารอ 30 นาที ก่อนส่งคำขอใหม่ หากต้องการรีเซ็ตทันที พิมพ์ "reset"'
-        );
+        const sess = await sessionModel.getSession(senderId);
+        const alreadyNotified = !!(sess && sess.tempData && sess.tempData.completedNoticeSent);
+
+        if (!alreadyNotified) {
+          await messengerService.sendMessage(
+            senderId,
+            'ข้อมูลของคุณถูกส่งเรียบร้อยแล้ว กรุณารอ 30 นาที ก่อนส่งคำขอใหม่ หากต้องการรีเซ็ตทันที พิมพ์ "reset"'
+          );
+          // mark as notified so we don't spam the user repeatedly
+          await sessionModel.updateData(senderId, { completedNoticeSent: true });
+        }
       } catch (e) {
         // swallow errors but log
         logger.error(`Error sending completed notice to ${senderId}:`, e);
