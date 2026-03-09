@@ -378,6 +378,8 @@ class FlowService {
       }
     }, delayMs);
   }
+}
+
 const flowInstance = new FlowService();
 
 // Compatibility wrapper for older code expecting processMessage(senderId, messaging)
