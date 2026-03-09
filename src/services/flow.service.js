@@ -34,9 +34,10 @@ class FlowService {
 
     // reset command
     if (message.text && message.text.toLowerCase() === 'reset') {
-      // Reset state and clear completed-notice flag so the notice can be sent again later
+      // Reset state, clear completed-notice flag, and re-enable bot (clear admin takeover)
       await sessionModel.updateState(senderId, this.STATES.INIT);
       await sessionModel.updateData(senderId, { completedNoticeSent: false });
+      await sessionModel.setAdminTakeover(senderId, false);
       return this.sendCategory(senderId);
     }
 
@@ -326,10 +327,20 @@ class FlowService {
 const flowInstance = new FlowService();
 
 // Compatibility wrapper for older code expecting processMessage(senderId, messaging)
+// `messaging` here is already messaging.message OR messaging.postback from webhook.controller
 flowInstance.processMessage = async function (senderId, messaging) {
-  // Facebook payload shape: messaging.message may exist
-  const message = messaging?.message || messaging;
-  return this.handleEvent(senderId, message);
+  // messaging.message scenario: { text, quick_reply, ... }
+  // messaging.postback scenario: { payload, title }
+  // Normalize into the shape handleEvent expects:
+  //   message.text / message.quick_reply?.payload / message.postback?.payload
+  let message;
+  if (messaging && messaging.payload && !messaging.quick_reply) {
+    // This is a raw postback object {payload, title} — wrap it
+    message = { postback: messaging };
+  } else {
+    message = messaging;
+  }
+  return this.handleEvent(senderId, message || {});
 };
 
 module.exports = flowInstance;

@@ -1,6 +1,7 @@
 const logger = require('../utils/logger');
 const facebookConfig = require('../config/facebook.config');
 const flowService = require('../services/flow.service');
+const sessionModel = require('../models/session.model');
 
 /**
  * GET /webhook
@@ -77,9 +78,39 @@ const processFacebookEntry = async (entry) => {
     logger.debug(`[DEBUG] messaging object:`, JSON.stringify(messaging, null, 2));
 
     try {
+      // Skip non-actionable events: delivery receipts, read receipts, reactions
+      if (messaging.delivery || messaging.read || messaging.reaction) {
+        logger.debug(`[Facebook] Skipping non-message event from ${senderId}`);
+        continue;
+      }
+
+      // ตรวจจับ echo = แอดมินตอบเองจาก Inbox
+      if (messaging.message?.is_echo) {
+        // sender ของ echo คือ Page, recipient คือลูกค้า
+        const customerId = messaging.recipient?.id;
+        if (customerId) {
+          await sessionModel.setAdminTakeover(customerId, true);
+          logger.info(`🛑 [Admin Takeover] Admin replied to ${customerId} — bot paused`);
+        }
+        continue;
+      }
+
       // Extract message or postback from messaging event
-      const messageData = messaging.message || messaging.postback || {};
-      
+      const messageData = messaging.message || messaging.postback;
+
+      // If there's no actionable data, skip
+      if (!messageData) {
+        logger.debug(`[Facebook] No message or postback in event from ${senderId}, skipping`);
+        continue;
+      }
+
+      // ถ้าแอดมิน takeover อยู่ → บอทหยุดทำงาน
+      const session = await sessionModel.getSession(senderId);
+      if (session?.adminTakenOver) {
+        logger.info(`🔇 [Bot Paused] Admin has taken over conversation with ${senderId} — skipping bot`);
+        continue;
+      }
+
       // Pass extracted data to flow service
       await flowService.processMessage(senderId, messageData);
     } catch (error) {

@@ -42,6 +42,12 @@ const sessionSchema = new mongoose.Schema(
       default: 0,
     },
 
+    // แอดมิน takeover: true = บอทหยุดทำงาน แอดมินดูแลแทน
+    adminTakenOver: {
+      type: Boolean,
+      default: false,
+    },
+
     // Timeout: 30 นาที
     expiresAt: {
       type: Date,
@@ -63,8 +69,12 @@ sessionSchema.statics.getSession = async function (facebookId) {
 
 sessionSchema.statics.createSession = async function (facebookId, state = 'INIT') {
   const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
-  const sess = new this({ facebookId, state, expiresAt });
-  await sess.save();
+  // Use upsert to avoid duplicate key errors from concurrent webhook events
+  const sess = await this.findOneAndUpdate(
+    { facebookId },
+    { $setOnInsert: { facebookId, state, expiresAt, tempData: {}, messageCount: 0 } },
+    { new: true, upsert: true }
+  );
   return sess;
 };
 
@@ -92,6 +102,19 @@ sessionSchema.statics.updateData = async function (facebookId, data = {}) {
 
   logger.debug(`[SESSION] updateData ${facebookId} -> ${JSON.stringify(merged)}`);
 
+  return session;
+};
+
+/**
+ * ตั้งค่า adminTakenOver flag
+ */
+sessionSchema.statics.setAdminTakeover = async function (facebookId, value) {
+  const session = await this.findOneAndUpdate(
+    { facebookId },
+    { $set: { adminTakenOver: value } },
+    { new: true, upsert: true }
+  );
+  logger.debug(`[SESSION] adminTakenOver for ${facebookId} -> ${value}`);
   return session;
 };
 
