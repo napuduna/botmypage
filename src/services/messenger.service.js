@@ -83,6 +83,11 @@ const sendButtonTemplate = async (recipientId, text, buttons) => {
  * Core function: Call Facebook Send API
  */
 const callSendAPI = async (messageData) => {
+  if (!facebookConfig.PAGE_ACCESS_TOKEN) {
+    logger.error('❌ PAGE_ACCESS_TOKEN is not set, cannot send message');
+    throw new Error('PAGE_ACCESS_TOKEN is not set');
+  }
+
   try {
     const response = await axios.post(
       `${facebookConfig.SEND_API_ENDPOINT}?access_token=${facebookConfig.PAGE_ACCESS_TOKEN}`,
@@ -97,7 +102,7 @@ const callSendAPI = async (messageData) => {
     logger.info(`✅ Message sent to ${messageData.recipient.id}`);
     return response.data;
   } catch (error) {
-    logger.error(`❌ Error sending message:`, error.response?.data || error.message);
+    logger.error(`❌ Error sending message:`, JSON.stringify(error.response?.data || error.message));
     throw error;
   }
 };

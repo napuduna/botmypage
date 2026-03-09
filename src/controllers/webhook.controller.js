@@ -114,7 +114,7 @@ const processFacebookEntry = async (entry) => {
       // Pass extracted data to flow service
       await flowService.processMessage(senderId, messageData);
     } catch (error) {
-      logger.error(`Error processing message from ${senderId}:`, error);
+      logger.error(`Error processing message from ${senderId}:`, JSON.stringify(error));
     }
   }
 };

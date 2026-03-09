@@ -14,7 +14,7 @@ const validateFacebookConfig = () => {
   const missing = required.filter((key) => !facebookConfig[key]);
 
   if (missing.length > 0) {
-    logger.warn(`⚠️  Missing Facebook config: ${missing.join(', ')}`);
+    logger.error(`❌ Missing Facebook config: ${missing.join(', ')} - Please set the environment variables`);
   } else {
     logger.info('✅ Facebook config loaded successfully');
     logger.debug(`Verify Token: ${facebookConfig.VERIFY_TOKEN}`);

@@ -114,7 +114,7 @@ class FlowService {
     const payload = message.quick_reply?.payload || message.postback?.payload;
     if (!payload) {
       logger.warn(`[WARN] handleCategory: no payload found in message`);
-      return;
+      return messengerService.sendMessage(senderId, 'กรุณาคลิกปุ่มด้านล่างเพื่อเลือกประเภทลูกค้า');
     }
 
     const type = payload === 'STUDENT' ? 'student' : 'real';
@@ -244,7 +244,7 @@ class FlowService {
     }
     if (!payload) {
       logger.warn(`[WARN] handleUrgent: no payload found in message`);
-      return;
+      return messengerService.sendMessage(senderId, 'กรุณาคลิกปุ่มด้านล่างเพื่อเลือกความเร่งด่วน');
     }
     logger.info(`[DEBUG] handleUrgent: payload=${payload}`);
 
