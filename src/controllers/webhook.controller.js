@@ -91,6 +91,10 @@ const processFacebookEntry = async (entry) => {
         if (customerId) {
           await sessionModel.setAdminTakeover(customerId, true);
           logger.info(`🛑 [Admin Takeover] Admin replied to ${customerId} — bot paused`);
+          
+          // Log the admin response for tracking
+          const adminMessage = messaging.message?.text || '[File/Image/Attachment]';
+          logger.info(`👨‍💼 [Admin Message] to ${customerId}: ${adminMessage}`);
         }
         continue;
       }

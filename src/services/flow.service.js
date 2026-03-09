@@ -257,9 +257,13 @@ class FlowService {
     await sessionModel.updateData(senderId, { urgent: urgentMap[payload] });
     await sessionModel.updateState(senderId, this.STATES.ASK_DETAIL);
 
+    // Set admin response timeout (12 hours)
+    const adminResponseTimeout = new Date(Date.now() + 12 * 60 * 60 * 1000);
+    await sessionModel.updateData(senderId, { adminResponseTimeout });
+
     return messengerService.sendMessage(
       senderId,
-      '🙏 ขอบคุณที่ติดต่อมานะครับ\nรบกวนทิ้งรายละเอียดงานไว้เพื่อการเสนอราคางานของคุณ\nแอดมินจะติดต่อกลับโดยเร็วที่สุดครับ 🎯'
+      'รบกวนทิ้งรายละเอียดงานไว้เพื่อการเสนอราคางานของคุณ'
     );
   }
 
@@ -286,6 +290,12 @@ class FlowService {
       urgent: payload.urgent,
       detail: payload.detail || message.text,
     });
+
+    // Send thank you message to customer
+    await messengerService.sendMessage(
+      senderId,
+      '🙏 ขอบคุณที่ติดต่อมานะครับ\nแอดมินจะติดต่อกลับโดยเร็วที่สุดครับ 🎯'
+    );
 
     // Send notification to LINE owner (Flex message)
     try {
@@ -320,10 +330,54 @@ class FlowService {
       logger.error('Error sending LINE notification', err);
     }
 
+    // Set state to COMPLETED and prepare for admin response
     await sessionModel.updateState(senderId, this.STATES.COMPLETED);
-    return messengerService.sendMessage(senderId, 'ข้อมูลถูกส่งเรียบร้อยแล้วครับ ✅');
+    
+    // Set 12-hour timeout for admin response - after this time, re-enable bot
+    const adminResponseDeadline = new Date(Date.now() + 12 * 60 * 60 * 1000);
+    await sessionModel.updateData(senderId, { adminResponseDeadline });
+
+    // Schedule automatic reset if admin doesn't respond within 12 hours
+    this.scheduleAdminResponseTimeout(senderId, adminResponseDeadline);
   }
-}
+
+  async scheduleAdminResponseTimeout(senderId, deadline) {
+    const now = new Date();
+    const delayMs = Math.max(0, deadline.getTime() - now.getTime());
+
+    logger.info(`[TIMEOUT] Scheduled admin response check for ${senderId} in ${Math.round(delayMs / 1000 / 60)} minutes`);
+
+    setTimeout(async () => {
+      try {
+        const session = await sessionModel.getSession(senderId);
+        
+        // Check if admin has already taken over the conversation
+        if (session && session.adminTakenOver) {
+          logger.info(`[TIMEOUT] Admin already responded for ${senderId}, no action needed`);
+          return;
+        }
+
+        // Admin didn't respond within 12 hours - reset bot and ask for details again
+        logger.warn(`[TIMEOUT] Admin didn't respond for ${senderId} within 12 hours - resetting bot`);
+        
+        await sessionModel.setAdminTakeover(senderId, false);
+        await sessionModel.updateState(senderId, this.STATES.INIT);
+        await sessionModel.updateData(senderId, { 
+          completedNoticeSent: false,
+          adminResponseDeadline: null 
+        });
+
+        // Send message to customer
+        await messengerService.sendMessage(
+          senderId,
+          'ยังไม่ได้รับการติดต่อกลับใช่ไหมครับ? 😊\nถ้าต้องการฝากงานใหม่ พิมพ์ "reset" หรือสามารถส่งข้อความมาได้เลย'
+        );
+
+      } catch (err) {
+        logger.error(`[TIMEOUT] Error handling admin response timeout for ${senderId}:`, err);
+      }
+    }, delayMs);
+  }
 const flowInstance = new FlowService();
 
 // Compatibility wrapper for older code expecting processMessage(senderId, messaging)
