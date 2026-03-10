@@ -95,6 +95,10 @@ const processFacebookEntry = async (entry) => {
           // Log the admin response for tracking
           const adminMessage = messaging.message?.text || '[File/Image/Attachment]';
           logger.info(`👨‍💼 [Admin Message] to ${customerId}: ${adminMessage}`);
+
+          // Schedule automatic reset if admin doesn't respond to new messages within 12 hours
+          const resetDeadline = new Date(Date.now() + 12 * 60 * 60 * 1000);
+          flowService.scheduleAdminResponseTimeout(customerId, resetDeadline);
         }
         continue;
       }

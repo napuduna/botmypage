@@ -41,9 +41,28 @@ class FlowService {
       return this.sendCategory(senderId);
     }
 
-    // If conversation already completed, block further submissions until TTL expires
+    // If admin has taken over, block bot from responding
+    if (session.adminTakenOver) {
+      try {
+        const sess = await sessionModel.getSession(senderId);
+        const alreadyNotified = !!(sess && sess.tempData && sess.tempData.adminTakeoverNoticeSent);
+
+        if (!alreadyNotified) {
+          await messengerService.sendMessage(
+            senderId,
+            '👨‍💼 แอดมินกำลังดูแลคุณอยู่ ขอเวลาสักครู่นะครับ 🙏'
+          );
+          await sessionModel.updateData(senderId, { adminTakeoverNoticeSent: true });
+        }
+      } catch (e) {
+        logger.error(`Error sending admin takeover notice to ${senderId}:`, e);
+      }
+      return;
+    }
+
+    // If conversation already completed, block further submissions until admin responds
     if (state === this.STATES.COMPLETED) {
-      // Inform user that their submission is received and to wait 30 minutes
+      // Inform user that their submission is received and waiting for admin
       // but only send this notice once until they explicitly reset.
       try {
         const sess = await sessionModel.getSession(senderId);
@@ -52,7 +71,7 @@ class FlowService {
         if (!alreadyNotified) {
           await messengerService.sendMessage(
             senderId,
-            'ข้อมูลของคุณถูกส่งเรียบร้อยแล้ว กรุณารอ 30 นาที ก่อนส่งคำขอใหม่ หากต้องการรีเซ็ตทันที พิมพ์ "reset"'
+            'ขอบคุณที่ฝากงานนะครับ กรุณารอสักครู่ แอดมินจะติดต่อกลับ 😊\nหากต้องการส่งงานใหม่ พิมพ์ "reset"'
           );
           // mark as notified so we don't spam the user repeatedly
           await sessionModel.updateData(senderId, { completedNoticeSent: true });
@@ -257,10 +276,6 @@ class FlowService {
     await sessionModel.updateData(senderId, { urgent: urgentMap[payload] });
     await sessionModel.updateState(senderId, this.STATES.ASK_DETAIL);
 
-    // Set admin response timeout (12 hours)
-    const adminResponseTimeout = new Date(Date.now() + 12 * 60 * 60 * 1000);
-    await sessionModel.updateData(senderId, { adminResponseTimeout });
-
     return messengerService.sendMessage(
       senderId,
       'รบกวนทิ้งรายละเอียดงานไว้เพื่อการเสนอราคางานของคุณ'
@@ -330,15 +345,8 @@ class FlowService {
       logger.error('Error sending LINE notification', err);
     }
 
-    // Set state to COMPLETED and prepare for admin response
+    // Set state to COMPLETED and wait for admin response
     await sessionModel.updateState(senderId, this.STATES.COMPLETED);
-    
-    // Set 12-hour timeout for admin response - after this time, re-enable bot
-    const adminResponseDeadline = new Date(Date.now() + 12 * 60 * 60 * 1000);
-    await sessionModel.updateData(senderId, { adminResponseDeadline });
-
-    // Schedule automatic reset if admin doesn't respond within 12 hours
-    this.scheduleAdminResponseTimeout(senderId, adminResponseDeadline);
   }
 
   async scheduleAdminResponseTimeout(senderId, deadline) {
@@ -351,26 +359,26 @@ class FlowService {
       try {
         const session = await sessionModel.getSession(senderId);
         
-        // Check if admin has already taken over the conversation
-        if (session && session.adminTakenOver) {
-          logger.info(`[TIMEOUT] Admin already responded for ${senderId}, no action needed`);
+        // Check if admin has already responded to new messages or if admin takeover was cleared
+        if (session && !session.adminTakenOver) {
+          logger.info(`[TIMEOUT] Admin takeover was cleared for ${senderId}, no reset needed`);
           return;
         }
 
-        // Admin didn't respond within 12 hours - reset bot and ask for details again
-        logger.warn(`[TIMEOUT] Admin didn't respond for ${senderId} within 12 hours - resetting bot`);
+        // Admin still hasn't engaged after 12 hours - reset bot to allow new submissions
+        logger.warn(`[TIMEOUT] Admin didn't engage for ${senderId} within 12 hours - resetting bot`);
         
         await sessionModel.setAdminTakeover(senderId, false);
         await sessionModel.updateState(senderId, this.STATES.INIT);
         await sessionModel.updateData(senderId, { 
           completedNoticeSent: false,
-          adminResponseDeadline: null 
+          adminTakeoverNoticeSent: false
         });
 
         // Send message to customer
         await messengerService.sendMessage(
           senderId,
-          'ยังไม่ได้รับการติดต่อกลับใช่ไหมครับ? 😊\nถ้าต้องการฝากงานใหม่ พิมพ์ "reset" หรือสามารถส่งข้อความมาได้เลย'
+          'ยังไม่ได้รับการติดต่อกลับใช่ไหมครับ? 😊\nถ้าต้องการฝากงานใหม่ สามารถส่งข้อความมาได้เลยครับ'
         );
 
       } catch (err) {
