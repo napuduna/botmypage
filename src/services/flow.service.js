@@ -48,7 +48,11 @@ class FlowService {
     if (message.text && message.text.toLowerCase() === 'reset') {
       // Reset state, clear completed-notice flag, and re-enable bot (clear admin takeover)
       await sessionModel.updateState(senderId, this.STATES.INIT);
-      await sessionModel.updateData(senderId, { completedNoticeSent: false });
+      await sessionModel.updateData(senderId, { 
+        completedNoticeSent: false,
+        categoryPromptSent: false,
+        categoryLocked: false
+      });
       await sessionModel.setAdminTakeover(senderId, false);
       return this.sendCategory(senderId);
     }
@@ -154,11 +158,19 @@ class FlowService {
       if (!payload) {
         logger.warn(`[WARN] handleCategory: no payload found in message`);
         
-        // Check if we've already sent the category prompt
+        // Check if category selection is locked (already warned once, waiting for reset)
         const sess = await sessionModel.getSession(senderId);
-        const alreadyNotified = !!(sess && sess.tempData && sess.tempData.categoryPromptSent);
+        const isLocked = !!(sess && sess.tempData && sess.tempData.categoryLocked);
 
-        if (!alreadyNotified) {
+        if (isLocked) {
+          // Category is locked - don't respond, user must type reset or wait for auto-reset
+          logger.info(`[LOCKED] User ${senderId} tried to interact while in locked category state`);
+          return;
+        }
+
+        const hasBeenPrompted = !!(sess && sess.tempData && sess.tempData.categoryPromptSent);
+
+        if (!hasBeenPrompted) {
           // First time - send the category prompt
           await sessionModel.updateData(senderId, { categoryPromptSent: true });
           return messengerService.sendQuickReply(senderId, '👋 สวัสดีครับ! กรุณาเลือกประเภทลูกค้า', [
@@ -166,8 +178,17 @@ class FlowService {
             { title: '💼 ผู้ประกอบการ', payload: 'BUSINESS' },
           ]);
         } else {
-          // User sent another message without selecting - remind about reset
-          return messengerService.sendMessage(senderId, '⚠️ กรุณาเลือกประเภทลูกค้าจากปุ่มด้านบน หรือพิมพ์ "reset" เพื่อเริ่มใหม่');
+          // Second time - send warning and lock the state
+          await sessionModel.updateData(senderId, { categoryLocked: true });
+          
+          // Schedule auto-reset after 12 hours
+          const resetDeadline = new Date(Date.now() + 12 * 60 * 60 * 1000);
+          this.scheduleCategoryAutoReset(senderId, resetDeadline);
+
+          return messengerService.sendMessage(
+            senderId,
+            '⚠️ กรุณาเลือกประเภทลูกค้าจากปุ่มด้านบน\n\nหรือพิมพ์ "reset" เพื่อเริ่มใหม่\n\n(จะรีเซ็ตอัตโนมัติใน 12 ชั่วโมง)'
+          );
         }
       }
 
@@ -175,7 +196,7 @@ class FlowService {
       logger.info(`[DEBUG] handleCategory: payload=${payload}, type=${type}`);
 
       // Clear the prompt flag when user selects
-      await sessionModel.updateData(senderId, { type, categoryPromptSent: false });
+      await sessionModel.updateData(senderId, { type, categoryPromptSent: false, categoryLocked: false });
       await sessionModel.updateState(senderId, this.STATES.SELECT_SERVICE);
 
       return messengerService.sendQuickReply(senderId, '🔎 กรุณาเลือกประเภทงานที่ต้องการ', [
@@ -429,6 +450,43 @@ class FlowService {
 
       } catch (err) {
         logger.error(`[TIMEOUT] Error handling admin response timeout for ${senderId}:`, err);
+      }
+    }, delayMs);
+  }
+
+  async scheduleCategoryAutoReset(senderId, deadline) {
+    const now = new Date();
+    const delayMs = Math.max(0, deadline.getTime() - now.getTime());
+
+    logger.info(`[CATEGORY_TIMEOUT] Scheduled category auto-reset for ${senderId} in ${Math.round(delayMs / 1000 / 60)} minutes`);
+
+    setTimeout(async () => {
+      try {
+        const session = await sessionModel.getSession(senderId);
+        
+        // Check if category is still locked
+        if (session && !session.tempData?.categoryLocked) {
+          logger.info(`[CATEGORY_TIMEOUT] Category lock was already cleared for ${senderId}, no reset needed`);
+          return;
+        }
+
+        // Auto-reset category lock after 12 hours
+        logger.warn(`[CATEGORY_TIMEOUT] Auto-resetting category lock for ${senderId} after 12 hours`);
+        
+        await sessionModel.updateState(senderId, this.STATES.INIT);
+        await sessionModel.updateData(senderId, { 
+          categoryPromptSent: false,
+          categoryLocked: false
+        });
+
+        // Send message to customer
+        await messengerService.sendMessage(
+          senderId,
+          '⏰ คำขออีกครั้งหรือครับ?\nกรุณาเลือกประเภทลูกค้า'
+        );
+
+      } catch (err) {
+        logger.error(`[CATEGORY_TIMEOUT] Error handling category auto-reset for ${senderId}:`, err);
       }
     }, delayMs);
   }
