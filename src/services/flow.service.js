@@ -129,6 +129,8 @@ class FlowService {
 
   async sendCategory(senderId) {
     try {
+      // Clear the prompt flag when explicitly sending category prompt
+      await sessionModel.updateData(senderId, { categoryPromptSent: false });
       await sessionModel.updateState(senderId, this.STATES.SELECT_CATEGORY);
 
       return messengerService.sendQuickReply(
@@ -151,13 +153,29 @@ class FlowService {
       const payload = message.quick_reply?.payload || message.postback?.payload;
       if (!payload) {
         logger.warn(`[WARN] handleCategory: no payload found in message`);
-        return messengerService.sendMessage(senderId, 'กรุณาคลิกปุ่มด้านล่างเพื่อเลือกประเภทลูกค้า');
+        
+        // Check if we've already sent the category prompt
+        const sess = await sessionModel.getSession(senderId);
+        const alreadyNotified = !!(sess && sess.tempData && sess.tempData.categoryPromptSent);
+
+        if (!alreadyNotified) {
+          // First time - send the category prompt
+          await sessionModel.updateData(senderId, { categoryPromptSent: true });
+          return messengerService.sendQuickReply(senderId, '👋 สวัสดีครับ! กรุณาเลือกประเภทลูกค้า', [
+            { title: '👨‍🎓 นักศึกษา', payload: 'STUDENT' },
+            { title: '💼 ผู้ประกอบการ', payload: 'BUSINESS' },
+          ]);
+        } else {
+          // User sent another message without selecting - remind about reset
+          return messengerService.sendMessage(senderId, '⚠️ กรุณาเลือกประเภทลูกค้าจากปุ่มด้านบน หรือพิมพ์ "reset" เพื่อเริ่มใหม่');
+        }
       }
 
       const type = payload === 'STUDENT' ? 'student' : 'real';
       logger.info(`[DEBUG] handleCategory: payload=${payload}, type=${type}`);
 
-      await sessionModel.updateData(senderId, { type });
+      // Clear the prompt flag when user selects
+      await sessionModel.updateData(senderId, { type, categoryPromptSent: false });
       await sessionModel.updateState(senderId, this.STATES.SELECT_SERVICE);
 
       return messengerService.sendQuickReply(senderId, '🔎 กรุณาเลือกประเภทงานที่ต้องการ', [
