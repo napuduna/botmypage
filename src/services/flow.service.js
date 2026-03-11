@@ -116,6 +116,8 @@ class FlowService {
   }
 
   async sendCategory(senderId) {
+    // clear any previous reminder flag when starting again
+    await sessionModel.updateData(senderId, { askedCategory: false });
     await sessionModel.updateState(senderId, this.STATES.SELECT_CATEGORY);
 
     return messengerService.sendQuickReply(
@@ -131,9 +133,17 @@ class FlowService {
   async handleCategory(senderId, message) {
     // Handle quick_reply or postback
     const payload = message.quick_reply?.payload || message.postback?.payload;
+
     if (!payload) {
       logger.warn(`[WARN] handleCategory: no payload found in message`);
-      return messengerService.sendMessage(senderId, 'กรุณาคลิกปุ่มด้านล่างเพื่อเลือกประเภทลูกค้า');
+      // only remind once per session
+      const sess = await sessionModel.getSession(senderId);
+      const alreadyAsked = sess?.tempData?.askedCategory;
+      if (!alreadyAsked) {
+        await messengerService.sendMessage(senderId, 'กรุณาคลิกปุ่มด้านล่างเพื่อเลือกประเภทลูกค้า');
+        await sessionModel.updateData(senderId, { askedCategory: true });
+      }
+      return;
     }
 
     const type = payload === 'STUDENT' ? 'student' : 'real';
