@@ -20,6 +20,18 @@ class FlowService {
       COMPLETED: 'COMPLETED',
     };
 
+    // Define service mapping once to avoid duplication
+    this.SERVICE_MAP = {
+      SERVICE_WEBSITE: 'เว็บไซต์',
+      SERVICE_PROGRAM: 'โปรแกรม',
+      SERVICE_ARDUINO: 'Arduino',
+      SERVICE_IOT: 'IOT',
+      SERVICE_BOT: 'บอท',
+      SERVICE_FIX: 'แก้ไขงาน',
+      SERVICE_CIRCUIT: 'เขียนวงจร',
+      SERVICE_FLEXSIM: 'Flexsim',
+    };
+
     this.OWNER_LINE_USER_ID = process.env.LINE_OWNER_ID || 'U0000000000000000000000';
   }
 
@@ -43,44 +55,12 @@ class FlowService {
 
     // If admin has taken over, block bot from responding
     if (session.adminTakenOver) {
-      try {
-        const sess = await sessionModel.getSession(senderId);
-        const alreadyNotified = !!(sess && sess.tempData && sess.tempData.adminTakeoverNoticeSent);
-
-        if (!alreadyNotified) {
-          await messengerService.sendMessage(
-            senderId,
-            '👨‍💼 แอดมินกำลังดูแลคุณอยู่ ขอเวลาสักครู่นะครับ 🙏'
-          );
-          await sessionModel.updateData(senderId, { adminTakeoverNoticeSent: true });
-        }
-      } catch (e) {
-        logger.error(`Error sending admin takeover notice to ${senderId}:`, e);
-      }
-      return;
+      return this._sendAdminTakeoverNotice(senderId);
     }
 
     // If conversation already completed, block further submissions until admin responds
     if (state === this.STATES.COMPLETED) {
-      // Inform user that their submission is received and waiting for admin
-      // but only send this notice once until they explicitly reset.
-      try {
-        const sess = await sessionModel.getSession(senderId);
-        const alreadyNotified = !!(sess && sess.tempData && sess.tempData.completedNoticeSent);
-
-        if (!alreadyNotified) {
-          await messengerService.sendMessage(
-            senderId,
-            'ขอบคุณที่ฝากงานนะครับ กรุณารอสักครู่ แอดมินจะติดต่อกลับ 😊\nหากต้องการส่งงานใหม่ พิมพ์ "reset"'
-          );
-          // mark as notified so we don't spam the user repeatedly
-          await sessionModel.updateData(senderId, { completedNoticeSent: true });
-        }
-      } catch (e) {
-        // swallow errors but log
-        logger.error(`Error sending completed notice to ${senderId}:`, e);
-      }
-      return;
+      return this._sendCompletedNotice(senderId);
     }
 
     switch (state) {
@@ -105,141 +85,164 @@ class FlowService {
       case this.STATES.ASK_DETAIL:
         return this.handleDetail(senderId, message);
 
-      case this.STATES.COMPLETED:
-        await sessionModel.updateState(senderId, this.STATES.INIT);
-        return this.sendCategory(senderId);
-
       default:
         await sessionModel.updateState(senderId, this.STATES.INIT);
         return this.sendCategory(senderId);
     }
   }
 
-  async sendCategory(senderId) {
-    // clear any previous reminder flag when starting again
-    await sessionModel.updateData(senderId, { askedCategory: false });
-    await sessionModel.updateState(senderId, this.STATES.SELECT_CATEGORY);
+  // Helper method to avoid code duplication for admin takeover notice
+  async _sendAdminTakeoverNotice(senderId) {
+    try {
+      const sess = await sessionModel.getSession(senderId);
+      const alreadyNotified = !!(sess && sess.tempData && sess.tempData.adminTakeoverNoticeSent);
 
-    return messengerService.sendQuickReply(
-      senderId,
-      '👋 สวัสดีครับ! กรุณาเลือกประเภทลูกค้า',
-      [
-        { title: '👨‍🎓 นักศึกษา', payload: 'STUDENT' },
-        { title: '💼 ผู้ประกอบการ', payload: 'BUSINESS' },
-      ]
-    );
+      if (!alreadyNotified) {
+        await messengerService.sendMessage(
+          senderId,
+          '👨‍💼 แอดมินกำลังดูแลคุณอยู่ ขอเวลาสักครู่นะครับ 🙏'
+        );
+        await sessionModel.updateData(senderId, { adminTakeoverNoticeSent: true });
+      }
+    } catch (e) {
+      logger.error(`Error sending admin takeover notice to ${senderId}:`, e);
+    }
+  }
+
+  // Helper method to avoid code duplication for completed notice
+  async _sendCompletedNotice(senderId) {
+    try {
+      const sess = await sessionModel.getSession(senderId);
+      const alreadyNotified = !!(sess && sess.tempData && sess.tempData.completedNoticeSent);
+
+      if (!alreadyNotified) {
+        await messengerService.sendMessage(
+          senderId,
+          'ขอบคุณที่ฝากงานนะครับ กรุณารอสักครู่ แอดมินจะติดต่อกลับ 😊\nหากต้องการส่งงานใหม่ พิมพ์ "reset"'
+        );
+        await sessionModel.updateData(senderId, { completedNoticeSent: true });
+      }
+    } catch (e) {
+      logger.error(`Error sending completed notice to ${senderId}:`, e);
+    }
+  }
+
+  async sendCategory(senderId) {
+    try {
+      await sessionModel.updateState(senderId, this.STATES.SELECT_CATEGORY);
+
+      return messengerService.sendQuickReply(
+        senderId,
+        '👋 สวัสดีครับ! กรุณาเลือกประเภทลูกค้า',
+        [
+          { title: '👨‍🎓 นักศึกษา', payload: 'STUDENT' },
+          { title: '💼 ผู้ประกอบการ', payload: 'BUSINESS' },
+        ]
+      );
+    } catch (error) {
+      logger.error(`Error sending category for ${senderId}:`, error);
+      return messengerService.sendMessage(senderId, 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
+    }
   }
 
   async handleCategory(senderId, message) {
-    // Handle quick_reply or postback
-    const payload = message.quick_reply?.payload || message.postback?.payload;
-
-    if (!payload) {
-      logger.warn(`[WARN] handleCategory: no payload found in message`);
-      // only remind once per session
-      const sess = await sessionModel.getSession(senderId);
-      const alreadyAsked = sess?.tempData?.askedCategory;
-      if (!alreadyAsked) {
-        await messengerService.sendMessage(senderId, 'กรุณาคลิกปุ่มด้านล่างเพื่อเลือกประเภทลูกค้า');
-        await sessionModel.updateData(senderId, { askedCategory: true });
+    try {
+      // Handle quick_reply or postback
+      const payload = message.quick_reply?.payload || message.postback?.payload;
+      if (!payload) {
+        logger.warn(`[WARN] handleCategory: no payload found in message`);
+        return messengerService.sendMessage(senderId, 'กรุณาคลิกปุ่มด้านล่างเพื่อเลือกประเภทลูกค้า');
       }
-      return;
+
+      const type = payload === 'STUDENT' ? 'student' : 'real';
+      logger.info(`[DEBUG] handleCategory: payload=${payload}, type=${type}`);
+
+      await sessionModel.updateData(senderId, { type });
+      await sessionModel.updateState(senderId, this.STATES.SELECT_SERVICE);
+
+      return messengerService.sendQuickReply(senderId, '🔎 กรุณาเลือกประเภทงานที่ต้องการ', [
+        { title: '🌐 เว็บไซต์', payload: 'SERVICE_WEBSITE' },
+        { title: '💻 โปรแกรม', payload: 'SERVICE_PROGRAM' },
+        { title: '🤖 Arduino', payload: 'SERVICE_ARDUINO' },
+        { title: '📡 IOT', payload: 'SERVICE_IOT' },
+        { title: '🤖 บอท', payload: 'SERVICE_BOT' },
+        { title: '🔧 แก้ไขงาน', payload: 'SERVICE_FIX' },
+        { title: '🔌 เขียนวงจร', payload: 'SERVICE_CIRCUIT' },
+        { title: '📊 Flexsim', payload: 'SERVICE_FLEXSIM' },
+        { title: '✏️ อื่นๆ', payload: 'SERVICE_OTHER' },
+      ]);
+    } catch (error) {
+      logger.error(`Error handling category for ${senderId}:`, error);
+      return messengerService.sendMessage(senderId, 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
     }
-
-    const type = payload === 'STUDENT' ? 'student' : 'real';
-    logger.info(`[DEBUG] handleCategory: payload=${payload}, type=${type}`);
-
-    await sessionModel.updateData(senderId, { type });
-    await sessionModel.updateState(senderId, this.STATES.SELECT_SERVICE);
-
-    return messengerService.sendQuickReply(senderId, '🔎 กรุณาเลือกประเภทงานที่ต้องการ', [
-      { title: '🌐 เว็บไซต์', payload: 'SERVICE_WEBSITE' },
-      { title: '💻 โปรแกรม', payload: 'SERVICE_PROGRAM' },
-      { title: '🤖 Arduino', payload: 'SERVICE_ARDUINO' },
-      { title: '📡 IOT', payload: 'SERVICE_IOT' },
-      { title: '🤖 บอท', payload: 'SERVICE_BOT' },
-      { title: '🔧 แก้ไขงาน', payload: 'SERVICE_FIX' },
-      { title: '🔌 เขียนวงจร', payload: 'SERVICE_CIRCUIT' },
-      { title: '📊 Flexsim', payload: 'SERVICE_FLEXSIM' },
-      { title: '✏️ อื่นๆ', payload: 'SERVICE_OTHER' },
-    ]);
   }
 
   async handleService(senderId, message) {
-    // Handle quick_reply or postback
-    const payload = message.quick_reply?.payload || message.postback?.payload;
-    // If payload missing, try to infer from message.text (user may type the option)
-    let resolvedPayload = payload;
-    const text = message.text && String(message.text).trim();
+    try {
+      // Handle quick_reply or postback
+      const payload = message.quick_reply?.payload || message.postback?.payload;
+      // If payload missing, try to infer from message.text (user may type the option)
+      let resolvedPayload = payload;
+      const text = message.text && String(message.text).trim();
 
-    // Try to map typed text to a payload key
-    if (!resolvedPayload && text) {
-      const found = Object.entries({
-        SERVICE_WEBSITE: 'เว็บไซต์',
-        SERVICE_PROGRAM: 'โปรแกรม',
-        SERVICE_ARDUINO: 'Arduino',
-        SERVICE_IOT: 'IOT',
-        SERVICE_BOT: 'บอท',
-        SERVICE_FIX: 'แก้ไขงาน',
-        SERVICE_CIRCUIT: 'เขียนวงจร',
-        SERVICE_FLEXSIM: 'Flexsim',
-      }).find(([, v]) => {
-        if (!v) return false;
-        const a = String(v).toLowerCase();
-        const b = String(text).toLowerCase();
-        return a === b || b.includes(a) || a.includes(b);
-      });
+      // Try to map typed text to a payload key
+      if (!resolvedPayload && text) {
+        const found = Object.entries(this.SERVICE_MAP).find(([, v]) => {
+          if (!v) return false;
+          const a = String(v).toLowerCase();
+          const b = String(text).toLowerCase();
+          return a === b || b.includes(a) || a.includes(b);
+        });
 
-      if (found) {
-        resolvedPayload = found[0];
-        logger.info(`[DEBUG] handleService: resolved payload from text -> ${resolvedPayload}`);
-      } else {
-        // Treat as custom service text
-        await sessionModel.updateData(senderId, { service: text });
-        await sessionModel.updateState(senderId, this.STATES.ASK_BUDGET);
-        return messengerService.sendMessage(
-          senderId,
-          '💸 มีงบประมาณไม่เกินเท่าไหร่ครับ? (กรุณาระบุตัวเลข เช่น 3000)'
-        );
+        if (found) {
+          resolvedPayload = found[0];
+          logger.info(`[DEBUG] handleService: resolved payload from text -> ${resolvedPayload}`);
+        } else {
+          // Treat as custom service text
+          await sessionModel.updateData(senderId, { service: text });
+          await sessionModel.updateState(senderId, this.STATES.ASK_BUDGET);
+          return messengerService.sendMessage(
+            senderId,
+            '💸 มีงบประมาณไม่เกินเท่าไหร่ครับ? (กรุณาระบุตัวเลข เช่น 3000)'
+          );
+        }
       }
+
+      if (resolvedPayload === 'SERVICE_OTHER') {
+        await sessionModel.updateState(senderId, this.STATES.ASK_CUSTOM_SERVICE);
+        return messengerService.sendMessage(senderId, 'กรุณาระบุประเภทงานที่ต้องการ');
+      }
+
+      // Use the singleton SERVICE_MAP instead of defining it again
+      await sessionModel.updateData(senderId, { service: this.SERVICE_MAP[resolvedPayload] });
+      logger.info(`[SESSION] saved service for ${senderId}: ${this.SERVICE_MAP[resolvedPayload]}`);
+      await sessionModel.updateState(senderId, this.STATES.ASK_BUDGET);
+
+      return messengerService.sendMessage(
+        senderId,
+        '💸 มีงบประมาณไม่เกินเท่าไหร่ครับ? (กรุณาระบุตัวเลข เช่น 3000)'
+      );
+    } catch (error) {
+      logger.error(`Error handling service for ${senderId}:`, error);
+      return messengerService.sendMessage(senderId, 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
     }
-
-    if (resolvedPayload === 'SERVICE_OTHER') {
-      await sessionModel.updateState(senderId, this.STATES.ASK_CUSTOM_SERVICE);
-      return messengerService.sendMessage(senderId, 'กรุณาระบุประเภทงานที่ต้องการ');
-    }
-
-    const serviceMap = {
-      SERVICE_WEBSITE: 'เว็บไซต์',
-      SERVICE_PROGRAM: 'โปรแกรม',
-      SERVICE_ARDUINO: 'Arduino',
-      SERVICE_IOT: 'IOT',
-      SERVICE_BOT: 'บอท',
-      SERVICE_FIX: 'แก้ไขงาน',
-      SERVICE_CIRCUIT: 'เขียนวงจร',
-      SERVICE_FLEXSIM: 'Flexsim',
-    };
-
-    await sessionModel.updateData(senderId, { service: serviceMap[resolvedPayload] });
-    logger.info(`[SESSION] saved service for ${senderId}: ${serviceMap[resolvedPayload]}`);
-    await sessionModel.updateState(senderId, this.STATES.ASK_BUDGET);
-
-    return messengerService.sendMessage(
-      senderId,
-      '💸 มีงบประมาณไม่เกินเท่าไหร่ครับ? (กรุณาระบุตัวเลข เช่น 3000)'
-    );
   }
 
   async handleCustomService(senderId, message) {
     if (!message.text) return;
 
-    await sessionModel.updateData(senderId, { service: message.text });
-    await sessionModel.updateState(senderId, this.STATES.ASK_BUDGET);
+    try {
+      await sessionModel.updateData(senderId, { service: message.text });
+      await sessionModel.updateState(senderId, this.STATES.ASK_BUDGET);
 
-    return messengerService.sendMessage(
-      senderId,
-      '💸 มีงบประมาณไม่เกินเท่าไหร่ครับ? (กรุณาระบุตัวเลข เช่น 3000)'
-    );
+      return messengerService.sendMessage(
+        senderId,
+        '💸 มีงบประมาณไม่เกินเท่าไหร่ครับ? (กรุณาระบุตัวเลข เช่น 3000)'
+      );
+    } catch (error) {
+      logger.error(`Error handling custom service for ${senderId}:`, error);
+      return messengerService.sendMessage(senderId, 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
+    }
   }
 
   async handleBudget(senderId, message) {
@@ -247,116 +250,131 @@ class FlowService {
       return messengerService.sendMessage(senderId, 'กรุณาระบุตัวเลขงบประมาณให้ถูกต้อง');
     }
 
-    const budget = parseInt(message.text, 10);
-    await sessionModel.updateData(senderId, { budget });
-    logger.info(`[SESSION] saved budget for ${senderId}: ${budget}`);
-    await sessionModel.updateState(senderId, this.STATES.ASK_URGENT);
+    try {
+      const budget = parseInt(message.text, 10);
+      await sessionModel.updateData(senderId, { budget });
+      logger.info(`[SESSION] saved budget for ${senderId}: ${budget}`);
+      await sessionModel.updateState(senderId, this.STATES.ASK_URGENT);
 
-    return messengerService.sendQuickReply(senderId, '⏱️ ต้องการงานด่วนภายในกี่วันครับ?', [
-      { title: '⚡ 3 วัน', payload: 'URGENT_3' },
-      { title: '📅 7 วัน', payload: 'URGENT_7' },
-      { title: '📆 14 วัน', payload: 'URGENT_14' },
-    ]);
+      return messengerService.sendQuickReply(senderId, '⏱️ ต้องการงานด่วนภายในกี่วันครับ?', [
+        { title: '⚡ 3 วัน', payload: 'URGENT_3' },
+        { title: '📅 7 วัน', payload: 'URGENT_7' },
+        { title: '📆 14 วัน', payload: 'URGENT_14' },
+      ]);
+    } catch (error) {
+      logger.error(`Error handling budget for ${senderId}:`, error);
+      return messengerService.sendMessage(senderId, 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
+    }
   }
 
   async handleUrgent(senderId, message) {
-    // Handle quick_reply or postback
-    let payload = message.quick_reply?.payload || message.postback?.payload;
-    const text = message.text && String(message.text).trim().toLowerCase();
+    try {
+      // Handle quick_reply or postback
+      let payload = message.quick_reply?.payload || message.postback?.payload;
+      const text = message.text && String(message.text).trim().toLowerCase();
 
-    // Fallback: if user typed a number/word instead of clicking quick reply
-    if (!payload && text) {
-      if (text.includes('3')) payload = 'URGENT_3';
-      else if (text.includes('7')) payload = 'URGENT_7';
-      else if (text.includes('14') || text.includes('14 วัน')) payload = 'URGENT_14';
-      if (payload) logger.info(`[DEBUG] handleUrgent: resolved payload from text -> ${payload}`);
+      // Fallback: if user typed a number/word instead of clicking quick reply
+      if (!payload && text) {
+        if (text.includes('3')) payload = 'URGENT_3';
+        else if (text.includes('7')) payload = 'URGENT_7';
+        else if (text.includes('14') || text.includes('14 วัน')) payload = 'URGENT_14';
+        if (payload) logger.info(`[DEBUG] handleUrgent: resolved payload from text -> ${payload}`);
+      }
+      if (!payload) {
+        logger.warn(`[WARN] handleUrgent: no payload found in message`);
+        return messengerService.sendMessage(senderId, 'กรุณาคลิกปุ่มด้านล่างเพื่อเลือกความเร่งด่วน');
+      }
+      logger.info(`[DEBUG] handleUrgent: payload=${payload}`);
+
+      const urgentMap = {
+        URGENT_3: '3 วัน',
+        URGENT_7: '7 วัน',
+        URGENT_14: '14 วัน',
+      };
+
+      await sessionModel.updateData(senderId, { urgent: urgentMap[payload] });
+      await sessionModel.updateState(senderId, this.STATES.ASK_DETAIL);
+
+      return messengerService.sendMessage(
+        senderId,
+        'รบกวนทิ้งรายละเอียดงานไว้เพื่อการเสนอราคางานของคุณ'
+      );
+    } catch (error) {
+      logger.error(`Error handling urgent for ${senderId}:`, error);
+      return messengerService.sendMessage(senderId, 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
     }
-    if (!payload) {
-      logger.warn(`[WARN] handleUrgent: no payload found in message`);
-      return messengerService.sendMessage(senderId, 'กรุณาคลิกปุ่มด้านล่างเพื่อเลือกความเร่งด่วน');
-    }
-    logger.info(`[DEBUG] handleUrgent: payload=${payload}`);
-
-    const urgentMap = {
-      URGENT_3: '3 วัน',
-      URGENT_7: '7 วัน',
-      URGENT_14: '14 วัน',
-    };
-
-    await sessionModel.updateData(senderId, { urgent: urgentMap[payload] });
-    await sessionModel.updateState(senderId, this.STATES.ASK_DETAIL);
-
-    return messengerService.sendMessage(
-      senderId,
-      'รบกวนทิ้งรายละเอียดงานไว้เพื่อการเสนอราคางานของคุณ'
-    );
   }
 
   async handleDetail(senderId, message) {
     if (!message.text) return;
 
-    await sessionModel.updateData(senderId, { detail: message.text });
-
-    const finalData = await sessionModel.getSession(senderId);
-
-    // finalData.tempData contains collected fields
-    const payload = finalData.tempData || {};
-
-    logger.debug(`[DEBUG] Session tempData before LINE push:`, JSON.stringify(payload));
-    logger.info(`[DETAIL] Collected: type=${payload.type}, service=${payload.service}, budget=${payload.budget}, urgent=${payload.urgent}, detail=${message.text}`);
-
-    // Normalize type stored earlier as 'student'|'real'
-    const type = payload.type || 'real';
-
-    // Save customer using existing customer.service API
-    await customerService.saveCustomerDetail(senderId, type, {
-      service: payload.service,
-      budget: payload.budget,
-      urgent: payload.urgent,
-      detail: payload.detail || message.text,
-    });
-
-    // Send thank you message to customer
-    await messengerService.sendMessage(
-      senderId,
-      '🙏 ขอบคุณที่ติดต่อมานะครับ\nแอดมินจะติดต่อกลับโดยเร็วที่สุดครับ 🎯'
-    );
-
-    // Send notification to LINE owner (Flex message)
     try {
-      const flex = {
-        type: 'bubble',
-        header: {
-          type: 'box',
-          layout: 'vertical',
-          contents: [
-            { type: 'text', text: '📌 ลูกค้าใหม่', weight: 'bold', size: 'md' },
-          ],
-        },
-        body: {
-          type: 'box',
-          layout: 'vertical',
-          contents: [
-            { type: 'text', text: `Facebook ID: ${senderId}`, wrap: true },
-            { type: 'text', text: `ประเภท: ${type}`, wrap: true },
-            { type: 'text', text: `บริการ: ${payload.service || '-'} `, wrap: true },
-            { type: 'text', text: `งบประมาณ: ${payload.budget || '-'} บาท`, wrap: true },
-            { type: 'text', text: `ความเร่งด่วน: ${payload.urgent || '-'}`, wrap: true },
-            { type: 'separator' },
-            { type: 'text', text: 'รายละเอียด:', weight: 'bold' },
-            { type: 'text', text: payload.detail || message.text || '-', wrap: true },
-          ],
-        },
-      };
+      await sessionModel.updateData(senderId, { detail: message.text });
 
-      const msg = lineService.createFlexMessage('ข้อมูลลูกค้าใหม่', flex);
-      await lineService.pushMessage(this.OWNER_LINE_USER_ID, msg);
-    } catch (err) {
-      logger.error('Error sending LINE notification', err);
+      const finalData = await sessionModel.getSession(senderId);
+
+      // finalData.tempData contains collected fields
+      const payload = finalData.tempData || {};
+
+      logger.debug(`[DEBUG] Session tempData before LINE push:`, JSON.stringify(payload));
+      logger.info(`[DETAIL] Collected: type=${payload.type}, service=${payload.service}, budget=${payload.budget}, urgent=${payload.urgent}, detail=${message.text}`);
+
+      // Normalize type stored earlier as 'student'|'real'
+      const type = payload.type || 'real';
+
+      // Save customer using existing customer.service API
+      await customerService.saveCustomerDetail(senderId, type, {
+        service: payload.service,
+        budget: payload.budget,
+        urgent: payload.urgent,
+        detail: payload.detail || message.text,
+      });
+
+      // Send thank you message to customer
+      await messengerService.sendMessage(
+        senderId,
+        '🙏 ขอบคุณที่ติดต่อมานะครับ\nแอดมินจะติดต่อกลับโดยเร็วที่สุดครับ 🎯'
+      );
+
+      // Send notification to LINE owner (Flex message)
+      try {
+        const flex = {
+          type: 'bubble',
+          header: {
+            type: 'box',
+            layout: 'vertical',
+            contents: [
+              { type: 'text', text: '📌 ลูกค้าใหม่', weight: 'bold', size: 'md' },
+            ],
+          },
+          body: {
+            type: 'box',
+            layout: 'vertical',
+            contents: [
+              { type: 'text', text: `Facebook ID: ${senderId}`, wrap: true },
+              { type: 'text', text: `ประเภท: ${type}`, wrap: true },
+              { type: 'text', text: `บริการ: ${payload.service || '-'} `, wrap: true },
+              { type: 'text', text: `งบประมาณ: ${payload.budget || '-'} บาท`, wrap: true },
+              { type: 'text', text: `ความเร่งด่วน: ${payload.urgent || '-'}`, wrap: true },
+              { type: 'separator' },
+              { type: 'text', text: 'รายละเอียด:', weight: 'bold' },
+              { type: 'text', text: payload.detail || message.text || '-', wrap: true },
+            ],
+          },
+        };
+
+        const msg = lineService.createFlexMessage('ข้อมูลลูกค้าใหม่', flex);
+        await lineService.pushMessage(this.OWNER_LINE_USER_ID, msg);
+      } catch (err) {
+        logger.error('Error sending LINE notification', err);
+      }
+
+      // Set state to COMPLETED and wait for admin response
+      await sessionModel.updateState(senderId, this.STATES.COMPLETED);
+    } catch (error) {
+      logger.error(`Error handling detail for ${senderId}:`, error);
+      return messengerService.sendMessage(senderId, 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
     }
-
-    // Set state to COMPLETED and wait for admin response
-    await sessionModel.updateState(senderId, this.STATES.COMPLETED);
   }
 
   async scheduleAdminResponseTimeout(senderId, deadline) {

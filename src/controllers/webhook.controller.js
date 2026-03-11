@@ -40,17 +40,27 @@ const verifyWebhook = (req, res) => {
 const handleMessage = async (req, res) => {
   const body = req.body;
 
+  // Validate request body
+  if (!body) {
+    logger.warn('[Webhook] Empty request body');
+    return res.status(400).send('Invalid request body');
+  }
+
   // ✅ ส่งค่า 200 ให้ sender ทันทีเพื่อไม่ให้ resend
   res.status(200).send('EVENT_RECEIVED');
 
   // Facebook Messenger format
   if (body.object === 'page') {
     try {
+      if (!body.entry || !Array.isArray(body.entry)) {
+        logger.warn('[Facebook] Invalid entry array structure');
+        return;
+      }
       for (const entry of body.entry) {
         await processFacebookEntry(entry);
       }
     } catch (error) {
-      logger.error('Error processing Facebook webhook:', error);
+      logger.error('Error processing Facebook webhook:', error.message);
     }
   }
 
@@ -61,8 +71,13 @@ const handleMessage = async (req, res) => {
         await processLineEvent(event);
       }
     } catch (error) {
-      logger.error('Error processing LINE webhook:', error);
+      logger.error('Error processing LINE webhook:', error.message);
     }
+  }
+
+  // If neither Facebook nor LINE format, log as unknown
+  if (body.object !== 'page' && !body.events) {
+    logger.debug('[Webhook] Unknown format - not Facebook nor LINE');
   }
 };
 
@@ -70,9 +85,21 @@ const handleMessage = async (req, res) => {
  * ประมวลผล Facebook entry
  */
 const processFacebookEntry = async (entry) => {
+  // Validate entry structure
+  if (!entry || !entry.messaging) {
+    logger.warn('[Facebook] Invalid entry structure - missing messaging');
+    return;
+  }
+
   for (const messaging of entry.messaging) {
-    const senderId = messaging.sender.id;
+    const senderId = messaging.sender?.id;
     const pageId = entry.id;
+
+    // Validate sender ID
+    if (!senderId) {
+      logger.warn('[Facebook] Missing sender ID in messaging event');
+      continue;
+    }
 
     logger.info(`📩 [Facebook] New event from ${senderId}`);
     logger.debug(`[DEBUG] messaging object:`, JSON.stringify(messaging, null, 2));
@@ -89,16 +116,20 @@ const processFacebookEntry = async (entry) => {
         // sender ของ echo คือ Page, recipient คือลูกค้า
         const customerId = messaging.recipient?.id;
         if (customerId) {
-          await sessionModel.setAdminTakeover(customerId, true);
-          logger.info(`🛑 [Admin Takeover] Admin replied to ${customerId} — bot paused`);
-          
-          // Log the admin response for tracking
-          const adminMessage = messaging.message?.text || '[File/Image/Attachment]';
-          logger.info(`👨‍💼 [Admin Message] to ${customerId}: ${adminMessage}`);
+          try {
+            await sessionModel.setAdminTakeover(customerId, true);
+            logger.info(`🛑 [Admin Takeover] Admin replied to ${customerId} — bot paused`);
+            
+            // Log the admin response for tracking
+            const adminMessage = messaging.message?.text || '[File/Image/Attachment]';
+            logger.info(`👨‍💼 [Admin Message] to ${customerId}: ${adminMessage}`);
 
-          // Schedule automatic reset if admin doesn't respond to new messages within 12 hours
-          const resetDeadline = new Date(Date.now() + 12 * 60 * 60 * 1000);
-          flowService.scheduleAdminResponseTimeout(customerId, resetDeadline);
+            // Schedule automatic reset if admin doesn't respond to new messages within 12 hours
+            const resetDeadline = new Date(Date.now() + 12 * 60 * 60 * 1000);
+            flowService.scheduleAdminResponseTimeout(customerId, resetDeadline);
+          } catch (err) {
+            logger.error(`Error processing echo message for ${customerId}:`, err);
+          }
         }
         continue;
       }
@@ -122,7 +153,7 @@ const processFacebookEntry = async (entry) => {
       // Pass extracted data to flow service
       await flowService.processMessage(senderId, messageData);
     } catch (error) {
-      logger.error(`Error processing message from ${senderId}:`, JSON.stringify(error));
+      logger.error(`Error processing message from ${senderId}:`, error.message);
     }
   }
 };
