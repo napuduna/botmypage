@@ -46,12 +46,16 @@ class FlowService {
 
     // reset command
     if (message.text && message.text.toLowerCase() === 'reset') {
-      // Reset state, clear completed-notice flag, and re-enable bot (clear admin takeover)
+      // Reset state, clear all flags, and re-enable bot (clear admin takeover)
       await sessionModel.updateState(senderId, this.STATES.INIT);
       await sessionModel.updateData(senderId, { 
         completedNoticeSent: false,
         categoryPromptSent: false,
-        categoryLocked: false
+        categoryLocked: false,
+        budgetPromptSent: false,
+        budgetLocked: false,
+        urgentPromptSent: false,
+        urgentLocked: false
       });
       await sessionModel.setAdminTakeover(senderId, false);
       return this.sendCategory(senderId);
@@ -286,12 +290,38 @@ class FlowService {
 
   async handleBudget(senderId, message) {
     if (!message.text || isNaN(message.text)) {
-      return messengerService.sendMessage(senderId, 'กรุณาระบุตัวเลขงบประมาณให้ถูกต้อง');
+      try {
+        const sess = await sessionModel.getSession(senderId);
+        const isLocked = !!(sess && sess.tempData && sess.tempData.budgetLocked);
+
+        if (isLocked) {
+          logger.info(`[LOCKED] User ${senderId} tried to input budget while locked`);
+          return;
+        }
+
+        const hasBeenPrompted = !!(sess && sess.tempData && sess.tempData.budgetPromptSent);
+
+        if (!hasBeenPrompted) {
+          await sessionModel.updateData(senderId, { budgetPromptSent: true });
+          return messengerService.sendMessage(senderId, 'กรุณาระบุตัวเลขงบประมาณให้ถูกต้อง');
+        } else {
+          await sessionModel.updateData(senderId, { budgetLocked: true });
+          const resetDeadline = new Date(Date.now() + 12 * 60 * 60 * 1000);
+          this.scheduleBudgetAutoReset(senderId, resetDeadline);
+          return messengerService.sendMessage(
+            senderId,
+            '⚠️ กรุณาระบุตัวเลขงบประมาณให้ถูกต้อง เช่น 3000 หรือ 5000\n\nหรือพิมพ์ "reset" เพื่อเริ่มใหม่\n\n(จะรีเซ็ตอัตโนมัติใน 12 ชั่วโมง)'
+          );
+        }
+      } catch (error) {
+        logger.error(`Error in handleBudget validation for ${senderId}:`, error);
+        return messengerService.sendMessage(senderId, 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
+      }
     }
 
     try {
       const budget = parseInt(message.text, 10);
-      await sessionModel.updateData(senderId, { budget });
+      await sessionModel.updateData(senderId, { budget, budgetPromptSent: false, budgetLocked: false });
       logger.info(`[SESSION] saved budget for ${senderId}: ${budget}`);
       await sessionModel.updateState(senderId, this.STATES.ASK_URGENT);
 
@@ -321,7 +351,34 @@ class FlowService {
       }
       if (!payload) {
         logger.warn(`[WARN] handleUrgent: no payload found in message`);
-        return messengerService.sendMessage(senderId, 'กรุณาคลิกปุ่มด้านล่างเพื่อเลือกความเร่งด่วน');
+        
+        // Check if urgent selection is locked
+        const sess = await sessionModel.getSession(senderId);
+        const isLocked = !!(sess && sess.tempData && sess.tempData.urgentLocked);
+
+        if (isLocked) {
+          logger.info(`[LOCKED] User ${senderId} tried to interact while urgent locked`);
+          return;
+        }
+
+        const hasBeenPrompted = !!(sess && sess.tempData && sess.tempData.urgentPromptSent);
+
+        if (!hasBeenPrompted) {
+          await sessionModel.updateData(senderId, { urgentPromptSent: true });
+          return messengerService.sendQuickReply(senderId, '⏱️ ต้องการงานด่วนภายในกี่วันครับ?', [
+            { title: '⚡ 3 วัน', payload: 'URGENT_3' },
+            { title: '📅 7 วัน', payload: 'URGENT_7' },
+            { title: '📆 14 วัน', payload: 'URGENT_14' },
+          ]);
+        } else {
+          await sessionModel.updateData(senderId, { urgentLocked: true });
+          const resetDeadline = new Date(Date.now() + 12 * 60 * 60 * 1000);
+          this.scheduleUrgentAutoReset(senderId, resetDeadline);
+          return messengerService.sendMessage(
+            senderId,
+            '⚠️ กรุณาคลิกปุ่มด้านล่างเพื่อเลือกความเร่งด่วน\n\nหรือพิมพ์ "reset" เพื่อเริ่มใหม่\n\n(จะรีเซ็ตอัตโนมัติใน 12 ชั่วโมง)'
+          );
+        }
       }
       logger.info(`[DEBUG] handleUrgent: payload=${payload}`);
 
@@ -331,7 +388,7 @@ class FlowService {
         URGENT_14: '14 วัน',
       };
 
-      await sessionModel.updateData(senderId, { urgent: urgentMap[payload] });
+      await sessionModel.updateData(senderId, { urgent: urgentMap[payload], urgentPromptSent: false, urgentLocked: false });
       await sessionModel.updateState(senderId, this.STATES.ASK_DETAIL);
 
       return messengerService.sendMessage(
@@ -487,6 +544,78 @@ class FlowService {
 
       } catch (err) {
         logger.error(`[CATEGORY_TIMEOUT] Error handling category auto-reset for ${senderId}:`, err);
+      }
+    }, delayMs);
+  }
+
+  async scheduleBudgetAutoReset(senderId, deadline) {
+    const now = new Date();
+    const delayMs = Math.max(0, deadline.getTime() - now.getTime());
+
+    logger.info(`[BUDGET_TIMEOUT] Scheduled budget auto-reset for ${senderId} in ${Math.round(delayMs / 1000 / 60)} minutes`);
+
+    setTimeout(async () => {
+      try {
+        const session = await sessionModel.getSession(senderId);
+        
+        // Check if budget is still locked
+        if (session && !session.tempData?.budgetLocked) {
+          logger.info(`[BUDGET_TIMEOUT] Budget lock was already cleared for ${senderId}, no reset needed`);
+          return;
+        }
+
+        // Auto-reset budget lock after 12 hours
+        logger.warn(`[BUDGET_TIMEOUT] Auto-resetting budget lock for ${senderId} after 12 hours`);
+        
+        await sessionModel.updateData(senderId, { 
+          budgetPromptSent: false,
+          budgetLocked: false
+        });
+
+        // Send message to customer
+        await messengerService.sendMessage(
+          senderId,
+          '⏰ มีปัญหาในการระบุงบประมาณใช่ไหมครับ?\nกรุณาระบุตัวเลขอีกครั้ง หรือพิมพ์ reset'
+        );
+
+      } catch (err) {
+        logger.error(`[BUDGET_TIMEOUT] Error handling budget auto-reset for ${senderId}:`, err);
+      }
+    }, delayMs);
+  }
+
+  async scheduleUrgentAutoReset(senderId, deadline) {
+    const now = new Date();
+    const delayMs = Math.max(0, deadline.getTime() - now.getTime());
+
+    logger.info(`[URGENT_TIMEOUT] Scheduled urgent auto-reset for ${senderId} in ${Math.round(delayMs / 1000 / 60)} minutes`);
+
+    setTimeout(async () => {
+      try {
+        const session = await sessionModel.getSession(senderId);
+        
+        // Check if urgent is still locked
+        if (session && !session.tempData?.urgentLocked) {
+          logger.info(`[URGENT_TIMEOUT] Urgent lock was already cleared for ${senderId}, no reset needed`);
+          return;
+        }
+
+        // Auto-reset urgent lock after 12 hours
+        logger.warn(`[URGENT_TIMEOUT] Auto-resetting urgent lock for ${senderId} after 12 hours`);
+        
+        await sessionModel.updateData(senderId, { 
+          urgentPromptSent: false,
+          urgentLocked: false
+        });
+
+        // Send message to customer
+        await messengerService.sendMessage(
+          senderId,
+          '⏰ มีปัญหาในการเลือกความเร่งด่วนใช่ไหมครับ?\nกรุณาเลือกตัวเลือกอีกครั้ง หรือพิมพ์ reset'
+        );
+
+      } catch (err) {
+        logger.error(`[URGENT_TIMEOUT] Error handling urgent auto-reset for ${senderId}:`, err);
       }
     }, delayMs);
   }
