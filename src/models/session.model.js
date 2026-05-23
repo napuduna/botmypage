@@ -105,13 +105,54 @@ sessionSchema.statics.updateData = async function (facebookId, data = {}) {
   return session;
 };
 
+sessionSchema.statics.markEventProcessed = async function (facebookId, eventId) {
+  if (!eventId) {
+    return true;
+  }
+
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+  await this.findOneAndUpdate(
+    { facebookId },
+    { $setOnInsert: { facebookId, state: 'INIT', tempData: {}, messageCount: 0, expiresAt } },
+    { new: true, upsert: true }
+  );
+
+  const session = await this.findOneAndUpdate(
+    {
+      facebookId,
+      'tempData.processedEventIds': { $ne: eventId },
+    },
+    {
+      $set: { updatedAt: new Date(), expiresAt },
+      $push: {
+        'tempData.processedEventIds': {
+          $each: [eventId],
+          $slice: -50,
+        },
+      },
+    },
+    { new: true, upsert: true }
+  );
+
+  logger.debug(`[SESSION] markEventProcessed ${facebookId} -> ${eventId}: ${!!session}`);
+
+  return !!session;
+};
+
 /**
  * ตั้งค่า adminTakenOver flag
  */
 sessionSchema.statics.setAdminTakeover = async function (facebookId, value) {
+  const expiresAt = value
+    ? new Date(Date.now() + 12 * 60 * 60 * 1000)
+    : new Date(Date.now() + 30 * 60 * 1000);
+
   const session = await this.findOneAndUpdate(
     { facebookId },
-    { $set: { adminTakenOver: value } },
+    {
+      $set: { adminTakenOver: value, updatedAt: new Date(), expiresAt },
+      $setOnInsert: { facebookId, state: 'INIT', tempData: {}, messageCount: 0 },
+    },
     { new: true, upsert: true }
   );
   logger.debug(`[SESSION] adminTakenOver for ${facebookId} -> ${value}`);

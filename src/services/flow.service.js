@@ -36,6 +36,8 @@ class FlowService {
   }
 
   async handleEvent(senderId, message) {
+    message = message || {};
+
     let session = await sessionModel.getSession(senderId);
 
     if (!session) {
@@ -159,8 +161,13 @@ class FlowService {
     try {
       // Handle quick_reply or postback
       const payload = message.quick_reply?.payload || message.postback?.payload;
-      if (!payload) {
-        logger.warn(`[WARN] handleCategory: no payload found in message`);
+      const categoryMap = {
+        STUDENT: 'student',
+        BUSINESS: 'real',
+      };
+
+      if (!payload || !categoryMap[payload]) {
+        logger.warn(`[WARN] handleCategory: invalid or missing payload: ${payload || 'none'}`);
         
         // Check if category selection is locked (already warned once, waiting for reset)
         const sess = await sessionModel.getSession(senderId);
@@ -196,7 +203,7 @@ class FlowService {
         }
       }
 
-      const type = payload === 'STUDENT' ? 'student' : 'real';
+      const type = categoryMap[payload];
       logger.info(`[DEBUG] handleCategory: payload=${payload}, type=${type}`);
 
       // Clear the prompt flag when user selects
@@ -256,6 +263,21 @@ class FlowService {
         return messengerService.sendMessage(senderId, 'กรุณาระบุประเภทงานที่ต้องการ');
       }
 
+      if (!resolvedPayload || !this.SERVICE_MAP[resolvedPayload]) {
+        logger.warn(`[WARN] handleService: invalid or missing payload: ${resolvedPayload || 'none'}`);
+        return messengerService.sendQuickReply(senderId, '🔎 กรุณาเลือกประเภทงานที่ต้องการ', [
+          { title: '🌐 เว็บไซต์', payload: 'SERVICE_WEBSITE' },
+          { title: '💻 โปรแกรม', payload: 'SERVICE_PROGRAM' },
+          { title: '🤖 Arduino', payload: 'SERVICE_ARDUINO' },
+          { title: '📡 IOT', payload: 'SERVICE_IOT' },
+          { title: '🤖 บอท', payload: 'SERVICE_BOT' },
+          { title: '🔧 แก้ไขงาน', payload: 'SERVICE_FIX' },
+          { title: '🔌 เขียนวงจร', payload: 'SERVICE_CIRCUIT' },
+          { title: '📊 Flexsim', payload: 'SERVICE_FLEXSIM' },
+          { title: '✏️ อื่นๆ', payload: 'SERVICE_OTHER' },
+        ]);
+      }
+
       // Use the singleton SERVICE_MAP instead of defining it again
       await sessionModel.updateData(senderId, { service: this.SERVICE_MAP[resolvedPayload] });
       logger.info(`[SESSION] saved service for ${senderId}: ${this.SERVICE_MAP[resolvedPayload]}`);
@@ -289,7 +311,10 @@ class FlowService {
   }
 
   async handleBudget(senderId, message) {
-    if (!message.text || isNaN(message.text)) {
+    const budgetText = typeof message.text === 'string' ? message.text.trim() : '';
+    const isValidBudget = /^[1-9]\d*$/.test(budgetText);
+
+    if (!isValidBudget) {
       try {
         const sess = await sessionModel.getSession(senderId);
         const isLocked = !!(sess && sess.tempData && sess.tempData.budgetLocked);
@@ -320,7 +345,7 @@ class FlowService {
     }
 
     try {
-      const budget = parseInt(message.text, 10);
+      const budget = parseInt(budgetText, 10);
       await sessionModel.updateData(senderId, { budget, budgetPromptSent: false, budgetLocked: false });
       logger.info(`[SESSION] saved budget for ${senderId}: ${budget}`);
       await sessionModel.updateState(senderId, this.STATES.ASK_URGENT);
@@ -349,7 +374,13 @@ class FlowService {
         else if (text.includes('14') || text.includes('14 วัน')) payload = 'URGENT_14';
         if (payload) logger.info(`[DEBUG] handleUrgent: resolved payload from text -> ${payload}`);
       }
-      if (!payload) {
+      const urgentMap = {
+        URGENT_3: '3 วัน',
+        URGENT_7: '7 วัน',
+        URGENT_14: '14 วัน',
+      };
+
+      if (!payload || !urgentMap[payload]) {
         logger.warn(`[WARN] handleUrgent: no payload found in message`);
         
         // Check if urgent selection is locked
@@ -381,12 +412,6 @@ class FlowService {
         }
       }
       logger.info(`[DEBUG] handleUrgent: payload=${payload}`);
-
-      const urgentMap = {
-        URGENT_3: '3 วัน',
-        URGENT_7: '7 วัน',
-        URGENT_14: '14 วัน',
-      };
 
       await sessionModel.updateData(senderId, { urgent: urgentMap[payload], urgentPromptSent: false, urgentLocked: false });
       await sessionModel.updateState(senderId, this.STATES.ASK_DETAIL);

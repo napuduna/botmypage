@@ -23,7 +23,13 @@ app.use(express.raw({ type: 'application/json' }));
 app.use((req, res, next) => {
   if (req.body && Buffer.isBuffer(req.body)) {
     req.rawBody = req.body.toString();
-    req.body = JSON.parse(req.rawBody);
+    try {
+      req.body = req.rawBody ? JSON.parse(req.rawBody) : {};
+    } catch (error) {
+      error.statusCode = 400;
+      error.message = 'Invalid JSON body';
+      return next(error);
+    }
   }
   next();
 });
@@ -57,7 +63,9 @@ app.use((req, res) => {
 // ============= Error Handler =============
 app.use((err, req, res, next) => {
   logger.error('Error:', err);
-  res.status(500).json({ error: 'Internal Server Error', message: err.message });
+  const statusCode = err.statusCode || err.status || 500;
+  const errorMessage = statusCode === 400 ? 'Invalid JSON body' : 'Internal Server Error';
+  res.status(statusCode).json({ error: errorMessage, message: err.message });
 });
 
 // ============= Database Connection =============
@@ -83,16 +91,20 @@ const PORT = process.env.PORT || 3000;
 
 const startServer = async () => {
   await connectDB();
-  app.listen(PORT, () => {
+  return app.listen(PORT, () => {
     logger.info(`🚀 Server running on port ${PORT}`);
     logger.info(`📝 Webhook URL: http://localhost:${PORT}/webhook`);
     logger.info(`💚 Health Check: http://localhost:${PORT}/health`);
   });
 };
 
-startServer().catch((error) => {
-  logger.error('Failed to start server:', error);
-  process.exit(1);
-});
+if (require.main === module) {
+  startServer().catch((error) => {
+    logger.error('Failed to start server:', error);
+    process.exit(1);
+  });
+}
 
 module.exports = app;
+module.exports.connectDB = connectDB;
+module.exports.startServer = startServer;

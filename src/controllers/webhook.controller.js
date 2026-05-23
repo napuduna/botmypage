@@ -3,6 +3,37 @@ const facebookConfig = require('../config/facebook.config');
 const flowService = require('../services/flow.service');
 const sessionModel = require('../models/session.model');
 
+const getFacebookEventId = (messaging) => {
+  const messageId = messaging.message?.mid || messaging.postback?.mid;
+  if (messageId) {
+    return `mid:${messageId}`;
+  }
+
+  const senderId = messaging.sender?.id || 'unknown-sender';
+  const recipientId = messaging.recipient?.id || 'unknown-recipient';
+  const timestamp = messaging.timestamp || 'unknown-time';
+  const payload = messaging.postback?.payload || messaging.message?.text;
+
+  if (!payload || timestamp === 'unknown-time') {
+    return null;
+  }
+
+  return `event:${senderId}:${recipientId}:${timestamp}:${payload}`;
+};
+
+const markEventProcessed = async (facebookId, eventId) => {
+  if (!eventId) {
+    return true;
+  }
+
+  const wasMarked = await sessionModel.markEventProcessed(facebookId, eventId);
+  if (!wasMarked) {
+    logger.info(`[Facebook] Duplicate event skipped for ${facebookId}: ${eventId}`);
+  }
+
+  return wasMarked;
+};
+
 /**
  * GET /webhook
  * Verify webhook endpoint (ใช้ verify token)
@@ -93,7 +124,9 @@ const processFacebookEntry = async (entry) => {
 
   for (const messaging of entry.messaging) {
     const senderId = messaging.sender?.id;
+    const recipientId = messaging.recipient?.id;
     const pageId = entry.id;
+    const eventId = getFacebookEventId(messaging);
 
     // Validate sender ID
     if (!senderId) {
@@ -111,12 +144,17 @@ const processFacebookEntry = async (entry) => {
         continue;
       }
 
-      // ตรวจจับ echo = แอดมินตอบเองจาก Inbox
-      if (messaging.message?.is_echo) {
+      // ตรวจจับ echo/admin reply = แอดมินตอบเองจาก Inbox หรือ event ที่ sender คือ Page
+      if (messaging.message && (messaging.message.is_echo || senderId === pageId)) {
         // sender ของ echo คือ Page, recipient คือลูกค้า
-        const customerId = messaging.recipient?.id;
+        const customerId = recipientId;
         if (customerId) {
           try {
+            const shouldProcess = await markEventProcessed(customerId, eventId);
+            if (!shouldProcess) {
+              continue;
+            }
+
             await sessionModel.setAdminTakeover(customerId, true);
             logger.info(`🛑 [Admin Takeover] Admin replied to ${customerId} — bot paused`);
             
@@ -140,6 +178,11 @@ const processFacebookEntry = async (entry) => {
       // If there's no actionable data, skip
       if (!messageData) {
         logger.debug(`[Facebook] No message or postback in event from ${senderId}, skipping`);
+        continue;
+      }
+
+      const shouldProcess = await markEventProcessed(senderId, eventId);
+      if (!shouldProcess) {
         continue;
       }
 
